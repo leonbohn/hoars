@@ -102,7 +102,7 @@ impl LabelExpression {
     }
 }
 
-pub const MAX_APS: usize = 8;
+pub const MAX_APS: u16 = 8;
 
 pub fn build_vars(count: u16) -> (BddVariableSet, Vec<BddVariable>) {
     let vs = BddVariableSet::new_anonymous(count);
@@ -533,36 +533,68 @@ fn build_error_report<I: Iterator<Item = Simple<String>>>(input: &str, errs: I) 
 }
 
 #[cfg(test)]
-pub(crate) struct Anonymous<const A: u16 = 8>;
+#[allow(unused)]
+pub(crate) struct Anonymous<const PARSED: bool = false>;
+#[cfg(test)]
+#[allow(unused)]
+pub(crate) type AnonymousParsed = Anonymous<true>;
+#[cfg(test)]
+#[allow(unused)]
+pub(crate) type AnonymousAbstract = Anonymous<false>;
 
 #[cfg(test)]
-impl<const A: u16> Anonymous<A> {
-    pub fn var_expr(n: usize) -> LabelExpression {
-        assert!(n < A as usize);
-        LabelExpression::Parsed(Self::var(n))
+#[allow(unused)]
+use AbstractLabelExpression::*;
+
+#[cfg(test)]
+#[allow(unused)]
+#[allow(dead_code)]
+impl Anonymous<false> {
+    pub fn var_expr(n: u16) -> LabelExpression {
+        assert!(n < MAX_APS);
+        LabelExpression::Abstract(AbstractLabelExpression::Integer(n))
     }
-    pub fn not_var_expr(n: usize) -> LabelExpression {
-        assert!(n < A as usize);
-        LabelExpression::Parsed(Self::not_var(n))
+    pub fn not_var_expr(n: u16) -> LabelExpression {
+        assert!(n < MAX_APS);
+        LabelExpression::Abstract(Negated(Box::new(Integer(n))))
     }
-    pub fn var_label(n: usize) -> Label {
-        assert!(n < A as usize);
+    pub fn top_label() -> Label {
+        Label(LabelExpression::Abstract(AbstractLabelExpression::Boolean(
+            true,
+        )))
+    }
+    pub fn var_label(n: u16) -> Label {
+        assert!(n < MAX_APS);
         Label(Self::var_expr(n))
     }
-    pub fn not_var_label(n: usize) -> Label {
-        assert!(n < A as usize);
+    pub fn not_var_label(n: u16) -> Label {
+        assert!(n < MAX_APS);
         Label(Self::not_var_expr(n))
     }
+}
+
+#[cfg(test)]
+#[allow(unused)]
+#[allow(dead_code)]
+impl Anonymous<true> {
+    pub fn var_expr(n: usize) -> LabelExpression {
+        assert!(n < MAX_APS as usize);
+        LabelExpression::Parsed(Self::var(n))
+    }
+    pub fn var_label(n: usize) -> Label {
+        assert!(n < MAX_APS as usize);
+        Label(Self::var_expr(n))
+    }
     pub fn var(n: usize) -> Bdd {
-        assert!(n < A as usize);
-        BddVariableSet::new_anonymous(A).mk_var(BddVariable::from_index(n))
+        assert!(n < MAX_APS as usize);
+        BddVariableSet::new_anonymous(MAX_APS as u16).mk_var(BddVariable::from_index(n))
     }
     pub fn not_var(n: usize) -> Bdd {
-        assert!(n < A as usize);
-        BddVariableSet::new_anonymous(A).mk_not_var(BddVariable::from_index(n))
+        assert!(n < MAX_APS as usize);
+        BddVariableSet::new_anonymous(MAX_APS).mk_not_var(BddVariable::from_index(n))
     }
     pub fn top() -> Bdd {
-        BddVariableSet::new_anonymous(A).mk_true()
+        BddVariableSet::new_anonymous(MAX_APS).mk_true()
     }
     pub fn top_expr() -> LabelExpression {
         LabelExpression::Parsed(Self::top())
@@ -582,8 +614,8 @@ mod tests {
     use crate::{
         body::{Edge, State},
         header::Header,
-        AcceptanceAtom, AcceptanceCondition, AcceptanceName, AcceptanceSignature, Anonymous, Body,
-        HeaderItem, HoaAutomaton, StateConjunction,
+        AcceptanceAtom, AcceptanceCondition, AcceptanceName, AcceptanceSignature,
+        AnonymousAbstract, Body, HeaderItem, HoaAutomaton, StateConjunction,
     };
 
     #[test]
@@ -634,12 +666,12 @@ mod tests {
             None,
             vec![
                 Edge::from_parts(
-                    Anonymous::<8>::var_label(0),
+                    AnonymousAbstract::var_label(0),
                     StateConjunction(vec![1]),
                     AcceptanceSignature(vec![0]),
                 ),
                 Edge::from_parts(
-                    Anonymous::<8>::not_var_label(0),
+                    AnonymousAbstract::not_var_label(0),
                     StateConjunction(vec![2]),
                     AcceptanceSignature(vec![0]),
                 ),
@@ -650,12 +682,12 @@ mod tests {
             None,
             vec![
                 Edge::from_parts(
-                    Anonymous::<8>::var_label(0),
+                    AnonymousAbstract::var_label(0),
                     StateConjunction(vec![1]),
                     AcceptanceSignature(vec![]),
                 ),
                 Edge::from_parts(
-                    Anonymous::<8>::not_var_label(0),
+                    AnonymousAbstract::not_var_label(0),
                     StateConjunction(vec![2]),
                     AcceptanceSignature(vec![]),
                 ),
@@ -666,12 +698,12 @@ mod tests {
             None,
             vec![
                 Edge::from_parts(
-                    Anonymous::<8>::var_label(0),
+                    AnonymousAbstract::var_label(0),
                     StateConjunction(vec![1]),
                     AcceptanceSignature(vec![]),
                 ),
                 Edge::from_parts(
-                    Anonymous::<8>::not_var_label(0),
+                    AnonymousAbstract::not_var_label(0),
                     StateConjunction(vec![2]),
                     AcceptanceSignature(vec![]),
                 ),

@@ -243,7 +243,7 @@ impl DerefMut for Body {
 mod tests {
     use chumsky::{primitive::end, Parser, Stream};
 
-    use crate::{lexer, Anonymous, Edge, Label, StateConjunction};
+    use crate::{lexer, AbstractLabelExpression, AnonymousAbstract, Edge, Label, StateConjunction};
 
     use super::State;
 
@@ -284,14 +284,17 @@ mod tests {
         [0 & !1] 0 {0}
         [1] 1 {0}"#;
         let t0 = Edge::from_parts(
-            Label(crate::LabelExpression::Parsed(
-                Anonymous::<2>::var(0).and(&Anonymous::<2>::not_var(1)),
+            Label(crate::LabelExpression::Abstract(
+                AbstractLabelExpression::Conjunction(vec![
+                    AbstractLabelExpression::Integer(0),
+                    AbstractLabelExpression::Negated(Box::new(AbstractLabelExpression::Integer(1))),
+                ]),
             )),
             StateConjunction(vec![0]),
             crate::AcceptanceSignature(vec![0]),
         );
         let t1 = Edge::from_parts(
-            Anonymous::<2>::var_label(1),
+            AnonymousAbstract::var_label(1),
             StateConjunction(vec![1]),
             crate::AcceptanceSignature(vec![0]),
         );
@@ -306,7 +309,7 @@ mod tests {
             [t] 1 {1}
         "#;
         let t0 = Edge::from_parts(
-            Anonymous::<2>::top_label(),
+            AnonymousAbstract::top_label(),
             StateConjunction(vec![1]),
             crate::AcceptanceSignature(vec![1]),
         );
