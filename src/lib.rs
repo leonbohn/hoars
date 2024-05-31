@@ -587,7 +587,7 @@ impl Anonymous<true> {
     }
     pub fn var(n: usize) -> Bdd {
         assert!(n < MAX_APS as usize);
-        BddVariableSet::new_anonymous(MAX_APS as u16).mk_var(BddVariable::from_index(n))
+        BddVariableSet::new_anonymous(MAX_APS).mk_var(BddVariable::from_index(n))
     }
     pub fn not_var(n: usize) -> Bdd {
         assert!(n < MAX_APS as usize);
