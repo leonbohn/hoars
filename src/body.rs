@@ -3,16 +3,16 @@ use std::ops::{Deref, DerefMut};
 use chumsky::prelude::*;
 
 use crate::{
-    lexer::Token, value, AbstractLabelExpression, AcceptanceSignature, AtomicProposition, Id,
+    lexer::Token, value, AcceptanceSignature, AtomicProposition, Id, LabelExpression,
     StateConjunction,
 };
 
 /// Newtype wrapper around a [`crate::LabelExpression`], implements [`Deref`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Label(pub AbstractLabelExpression);
+pub struct Label(pub LabelExpression);
 
 impl Deref for Label {
-    type Target = AbstractLabelExpression;
+    type Target = LabelExpression;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -155,6 +155,7 @@ pub fn label() -> impl Parser<Token, Label, Error = Simple<Token>> {
     just(Token::Paren('['))
         .ignore_then(value::label_expression())
         .then_ignore(just(Token::Paren(']')))
+        .map(LabelExpression::Abstract)
         .map(Label)
 }
 
@@ -242,7 +243,7 @@ impl DerefMut for Body {
 mod tests {
     use chumsky::{primitive::end, Parser, Stream};
 
-    use crate::{lexer, Edge, Label, StateConjunction, ALPHABET, VARS};
+    use crate::{lexer, Anonymous, Edge, Label, StateConjunction};
 
     use super::State;
 
@@ -283,12 +284,14 @@ mod tests {
         [0 & !1] 0 {0}
         [1] 1 {0}"#;
         let t0 = Edge::from_parts(
-            Label(ALPHABET.mk_var(VARS[0]).and(&ALPHABET.mk_not_var(VARS[1]))),
+            Label(crate::LabelExpression::Parsed(
+                Anonymous::<2>::var(0).and(&Anonymous::<2>::not_var(1)),
+            )),
             StateConjunction(vec![0]),
             crate::AcceptanceSignature(vec![0]),
         );
         let t1 = Edge::from_parts(
-            Label(ALPHABET.mk_var(VARS[1])),
+            Anonymous::<2>::var_label(1),
             StateConjunction(vec![1]),
             crate::AcceptanceSignature(vec![0]),
         );
@@ -303,7 +306,7 @@ mod tests {
             [t] 1 {1}
         "#;
         let t0 = Edge::from_parts(
-            Label(ALPHABET.mk_true()),
+            Anonymous::<2>::top_label(),
             StateConjunction(vec![1]),
             crate::AcceptanceSignature(vec![1]),
         );
