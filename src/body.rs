@@ -3,21 +3,9 @@ use std::ops::{Deref, DerefMut};
 use chumsky::prelude::*;
 
 use crate::{
-    lexer::Token, value, AcceptanceSignature, AtomicProposition, Id, LabelExpression,
+    lexer::Token, value, AcceptanceSignature, AtomicProposition, Id, Label, LabelExpression,
     StateConjunction,
 };
-
-/// Newtype wrapper around a [`crate::LabelExpression`], implements [`Deref`].
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Label(pub LabelExpression);
-
-impl Deref for Label {
-    type Target = LabelExpression;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Alphabet(pub Vec<AtomicProposition>);
@@ -243,7 +231,9 @@ impl DerefMut for Body {
 mod tests {
     use chumsky::{primitive::end, Parser, Stream};
 
-    use crate::{lexer, AbstractLabelExpression, AnonymousAbstract, Edge, Label, StateConjunction};
+    use crate::{
+        label::AnonymousAbstract, lexer, AbstractLabelExpression, Edge, Label, StateConjunction,
+    };
 
     use super::State;
 
