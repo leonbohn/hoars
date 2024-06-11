@@ -1,4 +1,4 @@
-use alphabet::PropExpression;
+use alphabet::{PropAlphabet, PropExpression, PropSymbol};
 use automata_core::prelude::*;
 use biodivine_lib_bdd::{Bdd, BddPartialValuation, BddVariable, BddVariableSet};
 use itertools::Itertools;
@@ -51,13 +51,13 @@ impl AbstractLabelExpression {
         }
     }
 
-    pub fn try_into_prop(self, num_aps: u8) -> Result<PropExpression, String> {
+    pub fn try_into_prop(self, num_aps: u8) -> Result<HoaExpression, String> {
         let var_set = BddVariableSet::new_anonymous(num_aps as u16);
         let vars: Vec<_> = (0..num_aps)
             .map(|i| BddVariable::from_index(i as usize))
             .collect();
         let bdd = self.try_into_bdd(&var_set, &vars)?;
-        Ok(PropExpression::from_bdd(bdd))
+        Ok(HoaExpression::from_bdd(bdd))
     }
 
     pub fn try_into_bdd(self, vs: &BddVariableSet, vars: &[BddVariable]) -> Result<Bdd, String> {
@@ -102,23 +102,29 @@ impl AbstractLabelExpression {
     }
 }
 
+pub const MAX_APS: u8 = 6;
+pub type HoaRepr = u8;
+/// Typedef for an alphabet used by a [`crate::HoaAutomaton`].
+pub type HoaAlphabet = PropAlphabet<HoaRepr>;
+/// Typedef for an expression used by a [`crate::HoaAutomaton`].
+pub type HoaExpression = PropExpression<HoaRepr>;
+/// Typedef for a symbol used by a [`crate::HoaAutomaton`].
+pub type HoaSymbol = PropSymbol<HoaRepr>;
+
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum LabelExpression {
-    Parsed(PropExpression),
+    Expression(HoaExpression),
     Abstract(AbstractLabelExpression),
 }
 
 impl LabelExpression {
-    pub fn try_into_bdd(self, vs: &BddVariableSet, vars: &[BddVariable]) -> Result<Bdd, String> {
+    pub fn try_into_hoa_expression(self, num_aps: u8) -> Result<HoaExpression, String> {
         match self {
-            LabelExpression::Parsed(b) => Ok(b.into_bdd()),
-            LabelExpression::Abstract(a) => a.try_into_bdd(vs, vars),
+            LabelExpression::Expression(b) => Ok(b),
+            LabelExpression::Abstract(b) => b.try_into_prop(num_aps),
         }
     }
 }
-
-pub const MAX_APS: u16 = 8;
-
 pub fn build_vars(count: u16) -> (BddVariableSet, Vec<BddVariable>) {
     let vs = BddVariableSet::new_anonymous(count);
     let vars = vs.variables().into_iter().take(count as usize).collect();
@@ -144,11 +150,11 @@ use AbstractLabelExpression::*;
 #[allow(dead_code)]
 impl Anonymous<false> {
     pub fn var_expr(n: u16) -> LabelExpression {
-        assert!(n < MAX_APS);
+        assert!(n < MAX_APS as u16);
         LabelExpression::Abstract(AbstractLabelExpression::Integer(n))
     }
     pub fn not_var_expr(n: u16) -> LabelExpression {
-        assert!(n < MAX_APS);
+        assert!(n < MAX_APS as u16);
         LabelExpression::Abstract(Negated(Box::new(Integer(n))))
     }
     pub fn top_label() -> Label {
@@ -157,11 +163,11 @@ impl Anonymous<false> {
         )))
     }
     pub fn var_label(n: u16) -> Label {
-        assert!(n < MAX_APS);
+        assert!(n < MAX_APS as u16);
         Label(Self::var_expr(n))
     }
     pub fn not_var_label(n: u16) -> Label {
-        assert!(n < MAX_APS);
+        assert!(n < MAX_APS as u16);
         Label(Self::not_var_expr(n))
     }
 }
@@ -172,7 +178,7 @@ impl Anonymous<false> {
 impl Anonymous<true> {
     pub fn var_expr(n: usize) -> LabelExpression {
         assert!(n < MAX_APS as usize);
-        LabelExpression::Parsed(PropExpression::from_bdd(Self::var(n)))
+        LabelExpression::Expression(HoaExpression::from_bdd(Self::var(n)))
     }
     pub fn var_label(n: usize) -> Label {
         assert!(n < MAX_APS as usize);
@@ -180,19 +186,38 @@ impl Anonymous<true> {
     }
     pub fn var(n: usize) -> Bdd {
         assert!(n < MAX_APS as usize);
-        BddVariableSet::new_anonymous(MAX_APS).mk_var(BddVariable::from_index(n))
+        BddVariableSet::new_anonymous(MAX_APS as u16).mk_var(BddVariable::from_index(n))
     }
     pub fn not_var(n: usize) -> Bdd {
         assert!(n < MAX_APS as usize);
-        BddVariableSet::new_anonymous(MAX_APS).mk_not_var(BddVariable::from_index(n))
+        BddVariableSet::new_anonymous(MAX_APS as u16).mk_not_var(BddVariable::from_index(n))
     }
     pub fn top() -> Bdd {
-        BddVariableSet::new_anonymous(MAX_APS).mk_true()
+        BddVariableSet::new_anonymous(MAX_APS as u16).mk_true()
     }
     pub fn top_expr() -> LabelExpression {
-        LabelExpression::Parsed(PropExpression::from_bdd(Self::top()))
+        LabelExpression::Expression(HoaExpression::from_bdd(Self::top()))
     }
     pub fn top_label() -> Label {
         Label(Self::top_expr())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::HoaAlphabet;
+
+    #[test]
+    fn hoa_symbol_char_conversion() {
+        let alphabet =
+            HoaAlphabet::from_apnames(["P0".to_string(), "P1".to_string(), "P2".to_string()]);
+
+        for chr in 'a'..='e' {
+            assert_eq!(
+                chr,
+                alphabet.hoa_symbol_to_char(&alphabet.char_to_symbol(chr))
+            );
+        }
     }
 }

@@ -9,7 +9,10 @@ pub mod output;
 mod value;
 
 pub mod label;
-pub use label::{build_vars, AbstractLabelExpression, Label, LabelExpression, MAX_APS};
+pub use label::{
+    build_vars, AbstractLabelExpression, HoaAlphabet, HoaExpression, HoaRepr, HoaSymbol, Label,
+    LabelExpression, MAX_APS,
+};
 
 use automata_core::prelude::*;
 
@@ -218,8 +221,11 @@ impl HoaAutomaton {
     }
 
     /// Counts the number of atomic propositions in the automaton.
-    pub fn num_aps(&self) -> usize {
-        self.aps().len()
+    pub fn num_aps(&self) -> u8 {
+        self.aps()
+            .len()
+            .try_into()
+            .expect("Could not fit number of aps in u8!")
     }
 
     /// Returns the acceptance condition of the automaton.
