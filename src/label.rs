@@ -104,11 +104,11 @@ impl AbstractLabelExpression {
 
 pub const MAX_APS: u8 = 6;
 pub type HoaRepr = u8;
-/// Typedef for an alphabet used by a [`crate::HoaAutomaton`].
+/// Typedef for an alphabet used by a [`crate::HoaRepresentation`].
 pub type HoaAlphabet = PropAlphabet<HoaRepr>;
-/// Typedef for an expression used by a [`crate::HoaAutomaton`].
+/// Typedef for an expression used by a [`crate::HoaRepresentation`].
 pub type HoaExpression = PropExpression<HoaRepr>;
-/// Typedef for a symbol used by a [`crate::HoaAutomaton`].
+/// Typedef for a symbol used by a [`crate::HoaRepresentation`].
 pub type HoaSymbol = PropSymbol<HoaRepr>;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]

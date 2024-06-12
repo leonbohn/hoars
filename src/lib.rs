@@ -38,7 +38,7 @@ use lexer::Token;
 /// The type of identifier used for states.
 pub type Id = u32;
 
-/// Represents the different types of error that can be encountered when parsing a [`HoaAutomaton`].
+/// Represents the different types of error that can be encountered when parsing a [`HoaRepresentation`].
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum FromHoaError {
     /// The version string does not match, we only support v1.
