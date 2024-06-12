@@ -82,7 +82,7 @@ impl Display for FromHoaError {
 /// The header contains all the information about the automaton (e.g. the number of states, the
 /// acceptance condition, aliases etc.) and the body contains the actual transitions.
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct HoaAutomaton {
+pub struct HoaRepresentation {
     header: Header,
     body: Body,
 }
@@ -94,7 +94,7 @@ pub type HoaAcceptance = (usize, AcceptanceCondition);
 /// names and label expression. This can be used to unalias an automaton.
 pub type Aliases = Vec<(AliasName, LabelExpression)>;
 
-impl HoaAutomaton {
+impl HoaRepresentation {
     /// Adds the given state.
     pub fn add_state(&mut self, state: State) {
         self.body.push(state);
@@ -132,7 +132,7 @@ impl HoaAutomaton {
         Header::parser()
             .then(Body::parser())
             .then_ignore(end())
-            .map(HoaAutomaton::from_parsed)
+            .map(HoaRepresentation::from_parsed)
     }
 
     /// Creates a new HOA automaton from the given version, header and
@@ -282,13 +282,13 @@ impl HoaAutomaton {
     }
 }
 
-impl Default for HoaAutomaton {
+impl Default for HoaRepresentation {
     fn default() -> Self {
-        HoaAutomaton::from_parts(vec![HeaderItem::Version("v1".into())].into(), vec![].into())
+        HoaRepresentation::from_parts(vec![HeaderItem::Version("v1".into())].into(), vec![].into())
     }
 }
 
-impl TryFrom<&str> for HoaAutomaton {
+impl TryFrom<&str> for HoaRepresentation {
     type Error = FromHoaError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
@@ -434,7 +434,7 @@ pub fn first_automaton_split_position(input: &str) -> Option<usize> {
     }
 }
 
-pub fn parse_hoa_automata(input: &str) -> Vec<HoaAutomaton> {
+pub fn parse_hoa_automata(input: &str) -> Vec<HoaRepresentation> {
     let mut out = Vec::new();
     for hoa_aut in input.split_inclusive("--END--") {
         if !hoa_aut.contains("--BODY--") {
@@ -455,7 +455,7 @@ mod tests {
         header::Header,
         label::AnonymousAbstract,
         AcceptanceAtom, AcceptanceCondition, AcceptanceName, AcceptanceSignature, Body, HeaderItem,
-        HoaAutomaton, StateConjunction,
+        HoaRepresentation, StateConjunction,
     };
 
     #[test]
@@ -486,7 +486,7 @@ mod tests {
               [!0] 2
              --END--
              "#;
-        let hoa_aut = HoaAutomaton::try_from(contents);
+        let hoa_aut = HoaRepresentation::try_from(contents);
 
         if let Err(err) = hoa_aut {
             println!("Encountered paring error\n{}", err);
@@ -551,7 +551,7 @@ mod tests {
         );
         assert_eq!(
             hoa_aut,
-            Ok(HoaAutomaton::from_parts(
+            Ok(HoaRepresentation::from_parts(
                 header,
                 Body::from(vec![q0, q1, q2])
             ))

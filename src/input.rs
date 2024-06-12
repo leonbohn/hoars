@@ -1,8 +1,8 @@
 use chumsky::{Parser, Stream};
 
-use crate::{build_error_report, lexer, FromHoaError, HoaAutomaton};
+use crate::{build_error_report, lexer, FromHoaError, HoaRepresentation};
 
-pub fn from_hoa(value: &str) -> Result<HoaAutomaton, FromHoaError> {
+pub fn from_hoa(value: &str) -> Result<HoaRepresentation, FromHoaError> {
     if value.contains("--ABORT--") {
         return Err(FromHoaError::Abort);
     }
@@ -21,7 +21,7 @@ pub fn from_hoa(value: &str) -> Result<HoaAutomaton, FromHoaError> {
 
     let length = input.chars().count();
     let start = std::time::Instant::now();
-    let out = HoaAutomaton::parser()
+    let out = HoaRepresentation::parser()
         .parse(Stream::from_iter(length..length + 1, tokens.into_iter()))
         .map_err(|error_list| {
             build_error_report(

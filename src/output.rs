@@ -4,10 +4,11 @@ use itertools::Itertools;
 
 use crate::{
     AcceptanceAtom, AcceptanceCondition, AcceptanceInfo, AcceptanceName, AcceptanceSignature,
-    AliasName, Edge, HeaderItem, HoaAutomaton, HoaBool, Label, Property, State, StateConjunction,
+    AliasName, Edge, HeaderItem, HoaBool, HoaRepresentation, Label, Property, State,
+    StateConjunction,
 };
 
-pub fn to_hoa(aut: &HoaAutomaton) -> String {
+pub fn to_hoa(aut: &HoaRepresentation) -> String {
     aut.header()
         .into_iter()
         .map(|header_item| header_item.to_string())
