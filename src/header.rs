@@ -249,13 +249,15 @@ mod tests {
         }
     }
 
+    use tracing::error;
+
     use super::*;
 
     fn assert_header(input: &str, cmp: &[HeaderItem]) {
         match process_header(input) {
             Ok(res) => assert_eq!(res, cmp),
             Err(err) => {
-                eprintln!("{}", err);
+                error!("{}", err);
                 unreachable!()
             }
         }

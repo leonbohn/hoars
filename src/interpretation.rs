@@ -152,6 +152,6 @@ mod tests {
             Box::new(LabelExpression::Integer(2)),
         );
         let interpretation = Interpretation::from(&expr);
-        println!("{:?}", interpretation);
+        info!("{:?}", interpretation);
     }
 }

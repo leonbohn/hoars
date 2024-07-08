@@ -15,6 +15,7 @@ pub use label::{
 };
 
 use automata_core::prelude::*;
+use tracing::warn;
 
 use std::fmt::{Debug, Display};
 
@@ -414,7 +415,7 @@ fn build_error_report<I: Iterator<Item = Simple<String>>>(input: &str, errs: I) 
 
 #[cfg(test)]
 fn print_error_report<I: Iterator<Item = Simple<String>>>(input: &str, errs: I) {
-    eprintln!("{}", build_error_report(input, errs))
+    tracing::error!("{}", build_error_report(input, errs))
 }
 
 pub fn first_automaton_split_position(input: &str) -> Option<usize> {
@@ -442,7 +443,7 @@ pub fn parse_hoa_automata(input: &str) -> Vec<HoaRepresentation> {
         }
         match hoa_aut.try_into() {
             Ok(aut) => out.push(aut),
-            Err(e) => println!("Error when parsing automaton: {}", e),
+            Err(e) => warn!("Error when parsing automaton: {}", e),
         }
     }
     out
@@ -450,6 +451,8 @@ pub fn parse_hoa_automata(input: &str) -> Vec<HoaRepresentation> {
 
 #[cfg(test)]
 mod tests {
+    use tracing::error;
+
     use crate::{
         body::{Edge, State},
         header::Header,
@@ -489,7 +492,7 @@ mod tests {
         let hoa_aut = HoaRepresentation::try_from(contents);
 
         if let Err(err) = hoa_aut {
-            println!("Encountered paring error\n{}", err);
+            error!("Encountered paring error\n{}", err);
             return;
         }
 
