@@ -1,5 +1,3 @@
-use alphabet::{PropAlphabet, PropExpression, PropSymbol};
-use automata_core::prelude::*;
 use biodivine_lib_bdd::{Bdd, BddPartialValuation, BddVariable, BddVariableSet};
 use itertools::Itertools;
 use std::ops::Deref;
@@ -57,7 +55,7 @@ impl AbstractLabelExpression {
             .map(|i| BddVariable::from_index(i as usize))
             .collect();
         let bdd = self.try_into_bdd(&var_set, &vars)?;
-        Ok(HoaExpression::from_bdd(bdd))
+        Ok(bdd)
     }
 
     pub fn try_into_bdd(self, vs: &BddVariableSet, vars: &[BddVariable]) -> Result<Bdd, String> {
@@ -105,11 +103,30 @@ impl AbstractLabelExpression {
 pub const MAX_APS: u8 = 6;
 pub type HoaRepr = u8;
 /// Typedef for an alphabet used by a [`crate::HoaRepresentation`].
-pub type HoaAlphabet = PropAlphabet<HoaRepr>;
+#[allow(unused)]
+pub struct HoaAlphabet(Vec<String>);
+
+impl HoaAlphabet {
+    pub fn hoa_symbol_to_char(&self, _symbol: &HoaSymbol) -> char {
+        todo!()
+    }
+
+    pub fn char_to_symbol(&self, _sym: char) -> HoaSymbol {
+        todo!()
+    }
+}
+
+impl FromIterator<String> for HoaAlphabet {
+    fn from_iter<T: IntoIterator<Item = String>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
 /// Typedef for an expression used by a [`crate::HoaRepresentation`].
-pub type HoaExpression = PropExpression<HoaRepr>;
+pub type HoaExpression = Bdd;
+
 /// Typedef for a symbol used by a [`crate::HoaRepresentation`].
-pub type HoaSymbol = PropSymbol<HoaRepr>;
+pub type HoaSymbol = Vec<HoaRepr>;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum LabelExpression {
@@ -178,7 +195,7 @@ impl Anonymous<false> {
 impl Anonymous<true> {
     pub fn var_expr(n: usize) -> LabelExpression {
         assert!(n < MAX_APS as usize);
-        LabelExpression::Expression(HoaExpression::from_bdd(Self::var(n)))
+        LabelExpression::Expression(Self::var(n))
     }
     pub fn var_label(n: usize) -> Label {
         assert!(n < MAX_APS as usize);
@@ -196,7 +213,7 @@ impl Anonymous<true> {
         BddVariableSet::new_anonymous(MAX_APS as u16).mk_true()
     }
     pub fn top_expr() -> LabelExpression {
-        LabelExpression::Expression(HoaExpression::from_bdd(Self::top()))
+        LabelExpression::Expression(Self::top())
     }
     pub fn top_label() -> Label {
         Label(Self::top_expr())
@@ -211,7 +228,7 @@ mod tests {
     #[test]
     fn hoa_symbol_char_conversion() {
         let alphabet =
-            HoaAlphabet::from_apnames(["P0".to_string(), "P1".to_string(), "P2".to_string()]);
+            HoaAlphabet::from_iter(["P0".to_string(), "P1".to_string(), "P2".to_string()]);
 
         for chr in 'a'..='e' {
             assert_eq!(

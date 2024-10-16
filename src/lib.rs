@@ -14,7 +14,6 @@ pub use label::{
     LabelExpression, MAX_APS,
 };
 
-use automata_core::prelude::*;
 use tracing::warn;
 
 use std::fmt::{Debug, Display};
