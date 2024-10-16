@@ -106,16 +106,6 @@ pub type HoaRepr = u8;
 #[allow(unused)]
 pub struct HoaAlphabet(Vec<String>);
 
-impl HoaAlphabet {
-    pub fn hoa_symbol_to_char(&self, _symbol: &HoaSymbol) -> char {
-        todo!()
-    }
-
-    pub fn char_to_symbol(&self, _sym: char) -> HoaSymbol {
-        todo!()
-    }
-}
-
 impl FromIterator<String> for HoaAlphabet {
     fn from_iter<T: IntoIterator<Item = String>>(iter: T) -> Self {
         Self(iter.into_iter().collect())
@@ -217,24 +207,5 @@ impl Anonymous<true> {
     }
     pub fn top_label() -> Label {
         Label(Self::top_expr())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use super::HoaAlphabet;
-
-    #[test]
-    fn hoa_symbol_char_conversion() {
-        let alphabet =
-            HoaAlphabet::from_iter(["P0".to_string(), "P1".to_string(), "P2".to_string()]);
-
-        for chr in 'a'..='e' {
-            assert_eq!(
-                chr,
-                alphabet.hoa_symbol_to_char(&alphabet.char_to_symbol(chr))
-            );
-        }
     }
 }
