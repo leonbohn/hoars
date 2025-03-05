@@ -10,8 +10,8 @@ mod value;
 
 pub mod label;
 pub use label::{
-    build_vars, AbstractLabelExpression, HoaAlphabet, HoaExpression, HoaRepr, HoaSymbol, Label,
-    LabelExpression, MAX_APS,
+    AbstractLabelExpression, HoaAlphabet, HoaExpression, HoaRepr, HoaSymbol, Label,
+    LabelExpression, MAX_APS, build_vars,
 };
 
 use tracing::warn;
@@ -24,7 +24,7 @@ use ariadne::{Color, Fmt, ReportKind, Source};
 use chumsky::prelude::*;
 pub use format::*;
 
-use chumsky::{prelude::Simple, Parser};
+use chumsky::{Parser, prelude::Simple};
 pub use format::{
     AcceptanceCondition, AcceptanceInfo, AcceptanceName, AcceptanceSignature, AliasName, Property,
 };
@@ -453,11 +453,11 @@ mod tests {
     use tracing::error;
 
     use crate::{
+        AcceptanceAtom, AcceptanceCondition, AcceptanceName, AcceptanceSignature, Body, HeaderItem,
+        HoaRepresentation, StateConjunction,
         body::{Edge, State},
         header::Header,
         label::AnonymousAbstract,
-        AcceptanceAtom, AcceptanceCondition, AcceptanceName, AcceptanceSignature, Body, HeaderItem,
-        HoaRepresentation, StateConjunction,
     };
 
     #[test]

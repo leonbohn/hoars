@@ -3,9 +3,10 @@ use std::ops::{Deref, DerefMut};
 use chumsky::prelude::*;
 
 use crate::{
+    AbstractLabelExpression, AcceptanceCondition, AcceptanceInfo, AcceptanceName, AliasName, Id,
+    Property, Token,
     format::{AtomicProposition, StateConjunction},
-    value, AbstractLabelExpression, AcceptanceCondition, AcceptanceInfo, AcceptanceName, AliasName,
-    Id, Property, Token,
+    value,
 };
 
 /// Represents a header item in a HOA file, for more information on each

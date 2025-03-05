@@ -1,6 +1,6 @@
 use chumsky::{Parser, Stream};
 
-use crate::{build_error_report, lexer, FromHoaError, HoaRepresentation};
+use crate::{FromHoaError, HoaRepresentation, build_error_report, lexer};
 
 pub fn from_hoa(value: &str) -> Result<HoaRepresentation, FromHoaError> {
     if value.contains("--ABORT--") {

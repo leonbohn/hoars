@@ -3,8 +3,8 @@ use std::ops::{Deref, DerefMut};
 use chumsky::prelude::*;
 
 use crate::{
-    lexer::Token, value, AcceptanceSignature, AtomicProposition, Id, Label, LabelExpression,
-    StateConjunction,
+    AcceptanceSignature, AtomicProposition, Id, Label, LabelExpression, StateConjunction,
+    lexer::Token, value,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -229,10 +229,10 @@ impl DerefMut for Body {
 
 #[cfg(test)]
 mod tests {
-    use chumsky::{primitive::end, Parser, Stream};
+    use chumsky::{Parser, Stream, primitive::end};
 
     use crate::{
-        label::AnonymousAbstract, lexer, AbstractLabelExpression, Edge, Label, StateConjunction,
+        AbstractLabelExpression, Edge, Label, StateConjunction, label::AnonymousAbstract, lexer,
     };
 
     use super::State;
