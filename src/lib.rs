@@ -336,7 +336,7 @@ impl std::fmt::Display for AbstractLabelExpression {
 fn build_error_report<I: Iterator<Item = Simple<String>>>(input: &str, errs: I) -> String {
     errs.into_iter()
         .map(|e| {
-            let report = ariadne::Report::build(ReportKind::Error, (), e.span().start);
+            let report = ariadne::Report::build(ReportKind::Error, e.span());
 
             let report = match e.reason() {
                 chumsky::error::SimpleReason::Unexpected => report

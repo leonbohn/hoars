@@ -8,7 +8,7 @@ readme = "README.md"
 keywords = ["omega-automata", "hoa", "automata"]
 categories = ["encoding", "parser-implementations"]
 license = "MIT or Apache-2.0"
-edition = "2021"
+edition = "2024"
 homepage = "https://github.com/leonbohn/automata"
 authors = ["León Bohn <bohn@lics.rwth-aachen.de>"]
 
@@ -23,7 +23,7 @@ tracing-subscriber = { workspace = true }
 biodivine-lib-bdd = { workspace = true }
 itertools = { workspace = true }
 
-ariadne = "0.4.1"
+ariadne = "0.5"
 chumsky = { version = "0.9.3", default-features = false, features = [
     "ahash",
     "std",
