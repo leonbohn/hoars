@@ -533,6 +533,7 @@ mod tests {
     use crate::{
         body::{Edge, State},
         header::Header,
+        output::to_hoa,
         AcceptanceAtom, AcceptanceCondition, AcceptanceName, AcceptanceSignature, Body, HeaderItem,
         HoaAutomaton, Label, StateConjunction, ALPHABET, VARS,
     };
@@ -635,5 +636,13 @@ mod tests {
                 Body::from(vec![q0, q1, q2])
             ))
         )
+    }
+
+    #[test]
+    fn real_test_state_acc() {
+        let contents = include_str!("../hoa/stateacc.hoa");
+        let hoa_aut = HoaAutomaton::try_from(contents);
+        let result = to_hoa(&hoa_aut.unwrap());
+        assert!(result.contains("State: 1 {0}"));
     }
 }

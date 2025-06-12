@@ -63,7 +63,7 @@ pub fn acceptance_info() -> impl Parser<Token, AcceptanceInfo, Error = Simple<To
 pub fn label_expression() -> impl Parser<Token, AbstractLabelExpression, Error = Simple<Token>> {
     recursive(|label_expression| {
         let value = boolean()
-            .map(|b| AbstractLabelExpression::Boolean(b))
+            .map(AbstractLabelExpression::Boolean)
             .or(integer().map(|i| AbstractLabelExpression::Integer(i as u16)));
         // .or(alias_name().map(|aname| LabelExpression::Alias(AliasName(aname))));
 

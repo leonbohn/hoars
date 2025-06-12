@@ -1,6 +1,5 @@
-use std::fmt::Display;
-
 use itertools::Itertools;
+use std::fmt::{Display, Write};
 
 use crate::{
     AcceptanceAtom, AcceptanceCondition, AcceptanceInfo, AcceptanceName, AcceptanceSignature,
@@ -8,11 +7,22 @@ use crate::{
 };
 
 pub fn to_hoa(aut: &HoaAutomaton) -> String {
+    let state_acceptance = aut.header().iter().any(|it| {
+        if let HeaderItem::Properties(properties) = it {
+            properties.iter().contains(&Property::StateAcceptance)
+        } else {
+            false
+        }
+    });
     aut.header()
         .into_iter()
         .map(|header_item| header_item.to_string())
         .chain(std::iter::once("--BODY--".to_string()))
-        .chain(aut.body().into_iter().map(|state| state.to_string()))
+        .chain(
+            aut.body()
+                .into_iter()
+                .map(|state| state.fmt_with_config(state_acceptance)),
+        )
         .chain(std::iter::once("--END--".to_string()))
         .join("\n")
 }
@@ -179,5 +189,33 @@ impl Display for State {
             writeln!(f, "{}", edge)?;
         }
         Ok(())
+    }
+}
+
+impl State {
+    fn fmt_with_config(&self, state_acceptance: bool) -> String {
+        let mut f = String::new();
+        if let Some(comment) = &self.1 {
+            write!(f, "State: {} \"{}\"", self.0, comment).unwrap();
+        } else {
+            write!(f, "State: {}", self.0).unwrap();
+        }
+        if state_acceptance {
+            let acceptance = self.2.iter().map(|it| &it.2).all_equal_value();
+            if let Ok(acceptance) = acceptance {
+                writeln!(f, " {acceptance}").unwrap();
+            } else {
+                writeln!(f).unwrap();
+            }
+            for edge in &self.2 {
+                writeln!(f, "{} {}", edge.0, edge.1).unwrap();
+            }
+        } else {
+            writeln!(f).unwrap();
+            for edge in &self.2 {
+                writeln!(f, "{edge}").unwrap();
+            }
+        }
+        f
     }
 }
