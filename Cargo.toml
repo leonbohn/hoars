@@ -10,7 +10,7 @@ categories = ["encoding", "parser-implementations"]
 license = "MIT"
 edition = "2024"
 authors = ["León Bohn <bohn@lics.rwth-aachen.de>"]
-exclude = ["hoa/*", "doc/hoaf.pdf"]
+exclude = ["hoa/*", "doc/hoaf.pdf", ".github", "scripts", "CLAUDE.md", "PLAN.md"]
 
 [dependencies]
 tracing = "0.1"
