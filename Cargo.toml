@@ -15,7 +15,7 @@ exclude = ["hoa/*", "doc/hoaf.pdf"]
 [dependencies]
 tracing = "0.1"
 biodivine-lib-bdd = "0.5.23"
-itertools = "0.14.0"
+itertools = "0.15.0"
 
 ariadne = "0.6"
 chumsky = { version = "0.9.3", default-features = false, features = [
