@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-`hoars` parses (and, partially, writes) the HOA (Hanoi Omega Automata) format, <https://adl.github.io/hoaf/>. It is the parser behind the `hoa` feature of the `automata` crate (`leonbohn/automata`). Edition 2024, version 0.2.1, MIT.
+`hoars` parses (and, partially, writes) the HOA (Hanoi Omega Automata) format, <https://adl.github.io/hoaf/>. It is the parser behind the `hoa` feature of the `automata` crate (`leonbohn/automata`). Edition 2024, version 0.3.0, MIT.
 
 ## History
 
@@ -29,4 +29,4 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 
 - Parsers use `chumsky` 0.9 (`Simple<Token>` errors), flagged with `allow(clippy::result_large_err)` in several places.
 - Test coverage is small (10 unit tests); no fuzzing.
-- Not yet published beyond crates.io `0.2.0`; `0.2.1` exists only here.
+- Version `0.3.0` is the first release since crates.io `0.2.0` (breaking: `biodivine-lib-bdd` 0.6).
