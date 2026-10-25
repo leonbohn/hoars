@@ -14,7 +14,7 @@ exclude = ["hoa/*", "doc/hoaf.pdf"]
 
 [dependencies]
 tracing = "0.1"
-biodivine-lib-bdd = "0.5.23"
+biodivine-lib-bdd = "0.6.3"
 itertools = "0.14.0"
 
 ariadne = "0.6"
