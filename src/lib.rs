@@ -187,7 +187,7 @@ impl HoaRepresentation {
         })
     }
 
-    /// Returns the number of edges in the automaton.
+    /// Returns the start state conjunction.
     pub fn start(&self) -> Vec<&StateConjunction> {
         debug_assert!(
             self.header()
@@ -490,7 +490,7 @@ mod tests {
         let hoa_aut = HoaRepresentation::try_from(contents);
 
         if let Err(err) = hoa_aut {
-            error!("Encountered paring error\n{}", err);
+            error!("Encountered parsing error\n{}", err);
             return;
         }
 

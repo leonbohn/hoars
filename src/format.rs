@@ -279,7 +279,7 @@ impl TryFrom<String> for Property {
             "weak" => Ok(Property::Weak),
             "very-weak" => Ok(Property::VeryWeak),
             "inherently-weak" => Ok(Property::InherentlyWeak),
-            "terminatl" => Ok(Property::Terminal),
+            "terminal" => Ok(Property::Terminal),
             "tight" => Ok(Property::Tight),
             "colored" => Ok(Property::Colored),
             unknown => Err(format!("{} is not a valid property", unknown)),
@@ -312,6 +312,15 @@ impl AcceptanceInfo {
 #[cfg(test)]
 mod tests {
     use crate::AcceptanceCondition;
+
+    #[test]
+    fn terminal_property_is_parsed() {
+        // the spelling "terminal" is the one that the writer produces
+        assert_eq!(
+            super::Property::try_from("terminal".to_string()),
+            Ok(super::Property::Terminal)
+        );
+    }
 
     #[test]
     fn parity_acceptance_creator() {
