@@ -298,6 +298,9 @@ impl TryFrom<&str> for HoaRepresentation {
 
 impl std::fmt::Display for AbstractLabelExpression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `&` binds tighter than `|`, and `!` applies to a single atom, so a
+        // disjunction inside a conjunction and a non-atom inside a negation
+        // have to be parenthesised to keep the meaning.
         match self {
             AbstractLabelExpression::Boolean(b) => match b {
                 true => write!(f, "t"),
@@ -305,32 +308,44 @@ impl std::fmt::Display for AbstractLabelExpression {
             },
             AbstractLabelExpression::Integer(i) => write!(f, "{i}"),
             AbstractLabelExpression::Negated(expr) => {
-                write!(f, "!{}", expr)
+                if is_atom(expr) {
+                    write!(f, "!{}", expr)
+                } else {
+                    write!(f, "!({})", expr)
+                }
             }
             AbstractLabelExpression::Conjunction(conjuncts) => {
-                let mut it = conjuncts.iter();
-                if let Some(first) = it.next() {
-                    Display::fmt(first, f)?;
+                if conjuncts.is_empty() {
+                    return write!(f, "t");
                 }
-                for succ in it {
-                    write!(f, " & ")?;
-                    Display::fmt(succ, f)?;
+                for (i, conjunct) in conjuncts.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " & ")?;
+                    }
+                    if matches!(conjunct, AbstractLabelExpression::Disjunction(_)) {
+                        write!(f, "({})", conjunct)?;
+                    } else {
+                        write!(f, "{}", conjunct)?;
+                    }
                 }
                 Ok(())
             }
             AbstractLabelExpression::Disjunction(disjuncts) => {
-                let mut it = disjuncts.iter();
-                if let Some(first) = it.next() {
-                    Display::fmt(first, f)?;
+                if disjuncts.is_empty() {
+                    return write!(f, "f");
                 }
-                for succ in it {
-                    write!(f, " | ")?;
-                    Display::fmt(succ, f)?;
-                }
-                Ok(())
+                write!(f, "{}", disjuncts.iter().format(" | "))
             }
         }
     }
+}
+
+/// Whether `expr` can be used as the argument of a negation without parentheses.
+fn is_atom(expr: &AbstractLabelExpression) -> bool {
+    matches!(
+        expr,
+        AbstractLabelExpression::Boolean(_) | AbstractLabelExpression::Integer(_)
+    )
 }
 
 fn build_error_report<I: Iterator<Item = Simple<String>>>(input: &str, errs: I) -> String {
