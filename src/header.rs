@@ -92,9 +92,7 @@ fn item() -> impl Parser<Token, HeaderItem, Error = Simple<Token>> {
 
     let acceptance_name = just(Token::Header("acc-name".to_string()))
         .ignore_then(value::identifier())
-        .try_map(|identifier, span| {
-            AcceptanceName::try_from(identifier).map_err(|e| Simple::custom(span, e))
-        })
+        .map(AcceptanceName::from)
         .then(value::acceptance_info().repeated())
         .map(|(name, info)| HeaderItem::AcceptanceName(name, info));
 
@@ -138,7 +136,7 @@ fn item() -> impl Parser<Token, HeaderItem, Error = Simple<Token>> {
     let properties = just(Token::Header("properties".to_string()))
         .ignore_then(
             value::identifier()
-                .try_map(|p, span| Property::try_from(p).map_err(|err| Simple::custom(span, err)))
+                .map(Property::from)
                 .repeated()
                 .at_least(1),
         )
@@ -318,7 +316,26 @@ mod tests {
                 HeaderItem::Properties(vec![Property::TransLabels, Property::StateLabels]),
             ],
         );
-        assert_fails(r#"properties: trans-labels statelabels"#);
+        assert_header(
+            "properties: trans-labels semi-deterministic",
+            &[
+                HeaderItem::Version("v1".into()),
+                HeaderItem::Properties(vec![
+                    Property::TransLabels,
+                    Property::Other("semi-deterministic".into()),
+                ]),
+            ],
+        );
+        assert_header(
+            "acc-name: Rabin-like 1",
+            &[
+                HeaderItem::Version("v1".into()),
+                HeaderItem::AcceptanceName(
+                    AcceptanceName::Other("Rabin-like".into()),
+                    vec![AcceptanceInfo::Int(1)],
+                ),
+            ],
+        );
         assert_fails(r#"properties: "#);
     }
 

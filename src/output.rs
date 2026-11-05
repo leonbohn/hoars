@@ -111,6 +111,7 @@ impl Display for Property {
             f,
             "{}",
             match self {
+                Property::Other(other) => other,
                 Property::StateLabels => "state-labels",
                 Property::TransLabels => "trans-labels",
                 Property::ImplicitLabels => "implicit-labels",
@@ -140,6 +141,7 @@ impl Display for AcceptanceName {
             f,
             "{}",
             match self {
+                AcceptanceName::Other(other) => other,
                 AcceptanceName::Buchi => "Buchi",
                 AcceptanceName::GeneralizedBuchi => "generalized-Buchi",
                 AcceptanceName::CoBuchi => "co-Buchi",

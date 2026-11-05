@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- `Property` and `AcceptanceName` gained an `Other(String)` variant, and their `TryFrom<String>` impls became infallible `From<String>`. Unknown `properties:` values (e.g. `semi-deterministic`) and `acc-name:` names (e.g. `Rabin-like`) now parse and are written back verbatim.
 - Accessors no longer `debug_assert` header multiplicities that the HOA spec does not require, so they work on valid files without `States:`, `Start:`, `acc-name:` or `AP:`:
   - `HoaRepresentation::aps` returns `&[String]` (was `&Vec<String>`) and is empty when the header has no `AP:`;
   - `num_aps` returns `u16` (was `u8`, which panicked above 255 APs);
