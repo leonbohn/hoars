@@ -24,7 +24,7 @@ use ariadne::{Color, Fmt, ReportKind, Source};
 use chumsky::prelude::*;
 pub use format::*;
 
-use chumsky::{Parser, prelude::Simple};
+use chumsky::Parser;
 pub use format::{
     AcceptanceCondition, AcceptanceInfo, AcceptanceName, AcceptanceSignature, AliasName, Property,
 };
@@ -175,8 +175,7 @@ impl HoaRepresentation {
     }
 
     /// Parses a HOA automaton from a string.
-    #[allow(clippy::result_large_err)]
-    pub fn parser() -> impl Parser<Token, Self, Error = Simple<Token>> {
+    pub fn parser<'a, I: lexer::TokInput<'a>>() -> impl Parser<'a, I, Self, lexer::Err<'a>> {
         Header::parser()
             .then(Body::parser())
             .then_ignore(end())
@@ -189,12 +188,12 @@ impl HoaRepresentation {
                     })
                     .unwrap_or(0);
                 let num_aps = u16::try_from(num_aps)
-                    .map_err(|_| Simple::custom(span.clone(), "too many atomic propositions"))?;
+                    .map_err(|_| Rich::custom(span, "too many atomic propositions"))?;
                 let states = raw_states
                     .into_iter()
                     .map(|s| s.resolve(num_aps))
                     .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| Simple::custom(span, e))?;
+                    .map_err(|e| Rich::custom(span, e))?;
                 Ok(HoaRepresentation::from_parts(header, states.into()))
             })
     }
@@ -512,71 +511,45 @@ fn is_atom(expr: &AbstractLabelExpression) -> bool {
     )
 }
 
-fn build_error_report<I: Iterator<Item = Simple<String>>>(input: &str, errs: I) -> String {
+fn build_error_report<'a, T: std::fmt::Display + 'a>(
+    input: &str,
+    errs: impl IntoIterator<Item = chumsky::error::Rich<'a, T>>,
+) -> String {
+    use chumsky::error::RichReason;
     errs.into_iter()
         .map(|e| {
-            let report = ariadne::Report::build(ReportKind::Error, e.span());
-
-            let report = match e.reason() {
-                chumsky::error::SimpleReason::Unexpected => report
-                    .with_message(format!(
-                        "{}, expected {}",
-                        if e.found().is_some() {
-                            "Unexpected token in input"
-                        } else {
-                            "Unexpected end of input"
-                        },
-                        if e.expected().len() == 0 {
-                            "something else".to_string()
-                        } else {
-                            e.expected()
-                                .map(|expected| match expected {
-                                    Some(expected) => expected.to_string(),
-                                    None => "end of input".to_string(),
-                                })
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        }
-                    ))
-                    .with_label(
-                        ariadne::Label::new(e.span())
-                            .with_message(format!(
-                                "Unexpected token {}",
-                                e.found()
-                                    .unwrap_or(&"end of file".to_string())
-                                    .fg(Color::Red)
-                            ))
-                            .with_color(Color::Red),
-                    ),
-                chumsky::error::SimpleReason::Unclosed { span, delimiter } => report
-                    .with_message(format!(
-                        "Unclosed delimiter {}",
-                        delimiter.fg(Color::Yellow)
-                    ))
-                    .with_label(
-                        ariadne::Label::new(span.clone())
-                            .with_message(format!(
-                                "Unclosed delimiter {}",
-                                delimiter.fg(Color::Yellow)
-                            ))
-                            .with_color(Color::Yellow),
+            let span = e.span().into_range();
+            let report = ariadne::Report::build(ReportKind::Error, span.clone()).with_config(
+                ariadne::Config::default().with_index_type(ariadne::IndexType::Byte),
+            );
+            let (message, label) = match e.reason() {
+                RichReason::Custom(msg) => (msg.clone(), msg.clone()),
+                _ => {
+                    let found = e.found().map(|t| t.to_string());
+                    let expected = e.expected().map(|p| p.to_string()).collect::<Vec<_>>();
+                    (
+                        format!(
+                            "{}, expected {}",
+                            if found.is_some() {
+                                "Unexpected token in input"
+                            } else {
+                                "Unexpected end of input"
+                            },
+                            if expected.is_empty() {
+                                "something else".to_string()
+                            } else {
+                                expected.join(", ")
+                            }
+                        ),
+                        format!("Unexpected token {}", found.unwrap_or("end of file".into())),
                     )
-                    .with_label(
-                        ariadne::Label::new(e.span())
-                            .with_message(format!(
-                                "Must be closed before this {}",
-                                e.found()
-                                    .unwrap_or(&"end of file".to_string())
-                                    .fg(Color::Red)
-                            ))
-                            .with_color(Color::Red),
-                    ),
-                chumsky::error::SimpleReason::Custom(msg) => report.with_message(msg).with_label(
-                    ariadne::Label::new(e.span())
-                        .with_message(format!("{}", msg.fg(Color::Red)))
-                        .with_color(Color::Red),
-                ),
+                }
             };
+            let report = report.with_message(message).with_label(
+                ariadne::Label::new(span)
+                    .with_message(label.fg(Color::Red))
+                    .with_color(Color::Red),
+            );
 
             let mut report_output = Vec::new();
             report
@@ -592,14 +565,17 @@ fn build_error_report<I: Iterator<Item = Simple<String>>>(input: &str, errs: I) 
 }
 
 #[cfg(test)]
-fn print_error_report<I: Iterator<Item = Simple<String>>>(input: &str, errs: I) {
+fn print_error_report<'a, T: std::fmt::Display + 'a>(
+    input: &str,
+    errs: impl IntoIterator<Item = chumsky::error::Rich<'a, T>>,
+) {
     tracing::error!("{}", build_error_report(input, errs))
 }
 
 /// Splits a token stream into automata: each returned chunk ends with a `--END--`, a
 /// trailing chunk without `--END--` is returned last. An `--ABORT--` discards everything
 /// since the previous boundary.
-fn split_automata(tokens: Vec<(Token, lexer::Span)>) -> Vec<Vec<(Token, lexer::Span)>> {
+fn split_automata(tokens: Vec<(Token<'_>, lexer::Span)>) -> Vec<Vec<(Token<'_>, lexer::Span)>> {
     let mut chunks = Vec::new();
     let mut current = Vec::new();
     for (token, span) in tokens {
@@ -633,13 +609,7 @@ pub fn first_automaton_split_position(input: &str) -> Option<usize> {
         .pop()?
         .1
         .end;
-    // spans count characters, the result is a byte index
-    Some(
-        input
-            .char_indices()
-            .nth(end)
-            .map_or(input.len(), |(i, _)| i),
-    )
+    Some(end)
 }
 
 /// Parses all automata in `input`. Automata that are aborted or that fail to parse are

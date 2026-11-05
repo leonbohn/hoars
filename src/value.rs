@@ -3,84 +3,83 @@ use chumsky::{prelude::*, select};
 use crate::{
     AbstractLabelExpression, AcceptanceAtom, AcceptanceCondition, AcceptanceInfo,
     AcceptanceSignature, HoaBool, Id, StateConjunction, Token,
+    lexer::{Err, TokInput},
 };
 
 #[allow(unused)]
-#[allow(clippy::result_large_err)]
-pub fn header() -> impl Parser<Token, String, Error = Simple<Token>> + Clone {
+pub fn header<'a, I: TokInput<'a>>() -> impl Parser<'a, I, String, Err<'a>> + Clone {
     select! {
-        Token::Header(hdr) => hdr,
+        Token::Header(hdr) => hdr.to_string(),
     }
 }
 
-#[allow(clippy::result_large_err)]
-pub fn boolean() -> impl Parser<Token, bool, Error = Simple<Token>> + Clone {
+pub fn boolean<'a, I: TokInput<'a>>() -> impl Parser<'a, I, bool, Err<'a>> + Clone {
     select! {
-        Token::Identifier(id) if id == *"t" => true,
-        Token::Identifier(id) if id == *"f" => false,
+        Token::Identifier("t") => true,
+        Token::Identifier("f") => false,
     }
 }
 
-#[allow(clippy::result_large_err)]
-pub fn integer() -> impl Parser<Token, Id, Error = Simple<Token>> + Clone {
+pub fn integer<'a, I: TokInput<'a>>() -> impl Parser<'a, I, Id, Err<'a>> + Clone {
     select! {
         Token::Int(n) => n,
     }
-    .try_map(|n, span| {
+    .try_map(|n: &str, span| {
         n.parse::<Id>()
-            .map_err(|_| Simple::custom(span, "integer out of range"))
+            .map_err(|_| Rich::custom(span, "integer out of range"))
     })
 }
 
-#[allow(clippy::result_large_err)]
-pub fn text() -> impl Parser<Token, String, Error = Simple<Token>> + Clone {
+pub fn text<'a, I: TokInput<'a>>() -> impl Parser<'a, I, String, Err<'a>> + Clone {
     select! {
-        Token::Text(txt) => txt,
+        Token::Text(txt) => txt.into_owned(),
     }
 }
 
-#[allow(clippy::result_large_err)]
-pub fn identifier() -> impl Parser<Token, String, Error = Simple<Token>> + Clone {
-    select! { Token::Identifier(ident) => ident }
+pub fn identifier<'a, I: TokInput<'a>>() -> impl Parser<'a, I, String, Err<'a>> + Clone {
+    select! { Token::Identifier(ident) => ident.to_string() }
 }
 
-#[allow(clippy::result_large_err)]
-pub fn alias_name() -> impl Parser<Token, String, Error = Simple<Token>> + Clone {
-    select! { Token::Alias(aname) => aname }
+pub fn alias_name<'a, I: TokInput<'a>>() -> impl Parser<'a, I, String, Err<'a>> + Clone {
+    select! { Token::Alias(aname) => aname.to_string() }
 }
 
-pub fn state_conjunction() -> impl Parser<Token, StateConjunction, Error = Simple<Token>> {
+pub fn state_conjunction<'a, I: TokInput<'a>>()
+-> impl Parser<'a, I, StateConjunction, Err<'a>> + Clone {
     integer()
         .separated_by(just(Token::Op('&')))
         .at_least(1)
+        .collect()
         .map(StateConjunction)
 }
 
-pub fn acceptance_signature() -> impl Parser<Token, AcceptanceSignature, Error = Simple<Token>> {
+pub fn acceptance_signature<'a, I: TokInput<'a>>()
+-> impl Parser<'a, I, AcceptanceSignature, Err<'a>> + Clone {
     integer()
         .repeated()
+        .collect()
         .delimited_by(just(Token::Paren('{')), just(Token::Paren('}')))
         .map(AcceptanceSignature)
 }
 
-#[allow(clippy::result_large_err)]
-pub fn acceptance_info() -> impl Parser<Token, AcceptanceInfo, Error = Simple<Token>> {
+pub fn acceptance_info<'a, I: TokInput<'a>>()
+-> impl Parser<'a, I, AcceptanceInfo, Err<'a>> + Clone {
     identifier()
         .map(AcceptanceInfo::Identifier)
         .or(integer().map(AcceptanceInfo::Int))
 }
 
-/// Parses an atomic proposition identifier in a label expression.
-#[allow(clippy::result_large_err)]
-fn ap_index() -> impl Parser<Token, AbstractLabelExpression, Error = Simple<Token>> + Clone {
+fn ap_index<'a, I: TokInput<'a>>()
+-> impl Parser<'a, I, AbstractLabelExpression, Err<'a>> + Clone {
     integer().try_map(|i, span| {
         u16::try_from(i)
             .map(AbstractLabelExpression::Integer)
-            .map_err(|_| Simple::custom(span, "AP identifier out of range"))
+            .map_err(|_| Rich::custom(span, "AP identifier out of range"))
     })
 }
 
-pub fn label_expression() -> impl Parser<Token, AbstractLabelExpression, Error = Simple<Token>> {
+pub fn label_expression<'a, I: TokInput<'a>>()
+-> impl Parser<'a, I, AbstractLabelExpression, Err<'a>> + Clone {
     recursive(|label_expression| {
         let value = boolean()
             .map(AbstractLabelExpression::Boolean)
@@ -102,36 +101,27 @@ pub fn label_expression() -> impl Parser<Token, AbstractLabelExpression, Error =
             });
 
         let conjunction = unary
-            .clone()
-            .map(|x| vec![x])
-            .then(just(Token::Op('&')).then(unary).repeated())
-            .foldl(|mut acc, (_tok, expr)| {
-                acc.push(expr);
-                acc
-            })
-            .map(|acc| match acc.len() {
-                0 => panic!("we do not expect this to happen..."),
-                1 => acc.into_iter().next().unwrap(),
+            .separated_by(just(Token::Op('&')))
+            .at_least(1)
+            .collect::<Vec<_>>()
+            .map(|mut acc| match acc.len() {
+                1 => acc.remove(0),
                 _ => AbstractLabelExpression::Conjunction(acc),
             });
 
         conjunction
-            .clone()
-            .map(|conj| vec![conj])
-            .then(just(Token::Op('|')).then(conjunction).repeated())
-            .foldl(|mut acc, (_tok, rhs)| {
-                acc.push(rhs);
-                acc
-            })
-            .map(|acc| match acc.len() {
-                0 => panic!("it seems we need to deal with the case where this is empty"),
-                1 => acc.into_iter().next().unwrap(),
+            .separated_by(just(Token::Op('|')))
+            .at_least(1)
+            .collect::<Vec<_>>()
+            .map(|mut acc| match acc.len() {
+                1 => acc.remove(0),
                 _ => AbstractLabelExpression::Disjunction(acc),
             })
     })
 }
 
-pub fn acceptance_condition() -> impl Parser<Token, AcceptanceCondition, Error = Simple<Token>> {
+pub fn acceptance_condition<'a, I: TokInput<'a>>()
+-> impl Parser<'a, I, AcceptanceCondition, Err<'a>> + Clone {
     recursive(|acceptance_condition| {
         let atom_value = just(Token::Op('!'))
             .or_not()
@@ -150,32 +140,27 @@ pub fn acceptance_condition() -> impl Parser<Token, AcceptanceCondition, Error =
             .then(atom_value.delimited_by(just(Token::Paren('(')), just(Token::Paren(')'))))
             .map(|(f, atom)| f(atom));
 
-        let atom =
-            boolean()
-                .map(HoaBool)
-                .map(AcceptanceCondition::Boolean)
-                .or(fin_inf_atom)
-                .or(acceptance_condition
-                    .delimited_by(just(Token::Paren('(')), just(Token::Paren(')'))));
+        let atom = boolean()
+            .map(HoaBool)
+            .map(AcceptanceCondition::Boolean)
+            .or(fin_inf_atom)
+            .or(acceptance_condition
+                .delimited_by(just(Token::Paren('(')), just(Token::Paren(')'))));
 
-        let conjunction = atom
-            .clone()
-            .then(
-                just(Token::Op('&'))
-                    .to(AcceptanceCondition::And)
-                    .then(atom)
-                    .repeated(),
-            )
-            .foldl(|lhs, (f, rhs)| f(Box::new(lhs), Box::new(rhs)));
+        let conjunction = atom.clone().foldl(
+            just(Token::Op('&'))
+                .to(AcceptanceCondition::And as fn(_, _) -> _)
+                .then(atom)
+                .repeated(),
+            |lhs, (f, rhs)| f(Box::new(lhs), Box::new(rhs)),
+        );
 
-        conjunction
-            .clone()
-            .then(
-                just(Token::Op('|'))
-                    .to(AcceptanceCondition::Or)
-                    .then(conjunction)
-                    .repeated(),
-            )
-            .foldl(|lhs, (f, rhs)| f(Box::new(lhs), Box::new(rhs)))
+        conjunction.clone().foldl(
+            just(Token::Op('|'))
+                .to(AcceptanceCondition::Or as fn(_, _) -> _)
+                .then(conjunction)
+                .repeated(),
+            |lhs, (f, rhs)| f(Box::new(lhs), Box::new(rhs)),
+        )
     })
 }

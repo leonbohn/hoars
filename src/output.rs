@@ -268,12 +268,19 @@ mod tests {
     #[test]
     fn round_trip_fixture_files() {
         let mut seen = 0;
-        for entry in std::fs::read_dir("hoa").expect("hoa/ must exist") {
-            let path = entry.unwrap().path();
-            let contents = std::fs::read_to_string(&path).unwrap();
-            for aut in crate::parse_hoa_automata(&contents) {
-                round_trip(&aut);
-                seen += 1;
+        let mut dirs = vec![std::path::PathBuf::from("hoa")];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).expect("hoa/ must exist") {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    dirs.push(path);
+                    continue;
+                }
+                let contents = std::fs::read_to_string(&path).unwrap();
+                for aut in crate::parse_hoa_automata(&contents) {
+                    round_trip(&aut);
+                    seen += 1;
+                }
             }
         }
         assert!(seen > 0, "no automata were parsed from hoa/");

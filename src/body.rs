@@ -4,7 +4,7 @@ use chumsky::prelude::*;
 
 use crate::{
     AbstractLabelExpression, AcceptanceSignature, AtomicProposition, Id, Label, LabelExpression,
-    StateConjunction, lexer::Token, value,
+    StateConjunction, lexer::{Err, TokInput, Token}, value,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -183,7 +183,7 @@ fn implicit_label(i: usize, num_aps: u16) -> Label {
     }))
 }
 
-pub fn label() -> impl Parser<Token, Label, Error = Simple<Token>> {
+pub fn label<'a, I: TokInput<'a>>() -> impl Parser<'a, I, Label, Err<'a>> + Clone {
     just(Token::Paren('['))
         .ignore_then(value::label_expression())
         .then_ignore(just(Token::Paren(']')))
@@ -191,7 +191,7 @@ pub fn label() -> impl Parser<Token, Label, Error = Simple<Token>> {
         .map(Label)
 }
 
-fn edge() -> impl Parser<Token, RawEdge, Error = Simple<Token>> {
+fn edge<'a, I: TokInput<'a>>() -> impl Parser<'a, I, RawEdge, Err<'a>> {
     label()
         .or_not()
         .then(value::state_conjunction())
@@ -201,8 +201,8 @@ fn edge() -> impl Parser<Token, RawEdge, Error = Simple<Token>> {
         })
 }
 
-pub(crate) fn state() -> impl Parser<Token, RawState, Error = Simple<Token>> {
-    just(Token::Header("State".to_string()))
+pub(crate) fn state<'a, I: TokInput<'a>>() -> impl Parser<'a, I, RawState, Err<'a>> {
+    just(Token::Header("State"))
         .ignore_then(
             label()
                 .or_not()
@@ -210,7 +210,7 @@ pub(crate) fn state() -> impl Parser<Token, RawState, Error = Simple<Token>> {
                 .then(value::text().or_not())
                 .then(value::acceptance_signature().or_not()),
         )
-        .then(edge().repeated())
+        .then(edge().repeated().collect::<Vec<_>>())
         .map(|((((label, id), comment), acc), edges)| RawState {
             label,
             id,
@@ -240,9 +240,9 @@ impl Body {
         Self(Vec::new())
     }
 
-    pub(crate) fn parser() -> impl Parser<Token, Vec<RawState>, Error = Simple<Token>> {
+    pub(crate) fn parser<'a, I: TokInput<'a>>() -> impl Parser<'a, I, Vec<RawState>, Err<'a>> {
         just(Token::BodyStart)
-            .ignore_then(state().repeated())
+            .ignore_then(state().repeated().collect())
             .then_ignore(just(Token::BodyEnd))
     }
 }
@@ -269,10 +269,10 @@ impl DerefMut for Body {
 
 #[cfg(test)]
 mod tests {
-    use chumsky::{Parser, Stream, primitive::end};
+    use chumsky::{Parser, input::Stream, prelude::{Input, end}};
 
     use crate::{
-        AbstractLabelExpression, Edge, Label, StateConjunction, label::AnonymousAbstract, lexer,
+        AbstractLabelExpression, Edge, Label, StateConjunction, label::AnonymousAbstract,
     };
 
     use super::State;
@@ -285,26 +285,13 @@ mod tests {
     pub fn process_body(input: &str) -> Result<Vec<State>, ()> {
         use crate::{body::Body, print_error_report};
 
-        let tokens = lexer::tokenizer().parse(input).map_err(|error_list| {
-            print_error_report(
-                input,
-                error_list.into_iter().map(|err| err.map(|c| c.to_string())),
-            )
-        })?;
-
-        for tok in &tokens {
-            print!("{}", tok.0);
-        }
-        let len = input.chars().count();
+        let tokens = crate::input::lex(input).map_err(|e| tracing::error!("{e}"))?;
+        let eoi = (input.len()..input.len()).into();
         let ast = Body::parser()
             .then_ignore(end())
-            .parse(Stream::from_iter(len..len + 1, tokens.into_iter()))
-            .map_err(|error_list| {
-                print_error_report(
-                    input,
-                    error_list.into_iter().map(|err| err.map(|c| c.to_string())),
-                )
-            })?;
+            .parse(Stream::from_iter(tokens).map(eoi, |(t, s)| (t, s)))
+            .into_result()
+            .map_err(|errors| print_error_report(input, errors))?;
         // the tests only use explicit labels, so the AP count does not matter
         ast.into_iter()
             .map(|s| s.resolve(0).map_err(|_| ()))

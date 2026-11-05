@@ -36,3 +36,17 @@ counts are deterministic (valgrind/gungraun); wall-clock numbers are from one ma
 | write | 1.13 ms | 11.96 ms | 240 ms |
 
 These match the numbers in REFACTOR.md P2 (9.9 s, 1.18 s).
+
+## Issue 11, step 1: chumsky 0.9 → 0.13 (same two-stage lexer/parser, tokens borrow from the input)
+
+| Benchmark | Instructions | vs. baseline |
+|---|---:|---:|
+| parse_generated 250 | 42,185,713 | −59.2 % (2.45×) |
+| parse_generated 1000 | 169,356,712 | −59.0 % (2.44×) |
+| parse_generated 4000 | 675,566,420 | −59.2 % (2.45×) |
+| parse_fixtures ltl | 103,141,813 | −58.4 % |
+| parse_fixtures synthetic | 137,022,599 | −58.4 % |
+| parse_fixtures spot | 497,143,446 | −58.7 % |
+
+Wall clock parse: 1k 16.97 ms (3.74 MiB/s), 10k 171.6 ms (3.97 MiB/s), **200k (15 MB) 3.82 s** (3.95 MiB/s)
+against 10.63 s before (2.8×). The ≥ 10× target of issue 11 is not reached by this step alone.
