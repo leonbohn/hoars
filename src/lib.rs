@@ -123,16 +123,29 @@ impl HoaRepresentation {
         &mut self.body
     }
 
-    fn from_parsed((header, body): (Header, Body)) -> Self {
-        Self::from_parts(header, body)
-    }
-
     /// Parses a HOA automaton from a string.
+    #[allow(clippy::result_large_err)]
     pub fn parser() -> impl Parser<Token, Self, Error = Simple<Token>> {
         Header::parser()
             .then(Body::parser())
             .then_ignore(end())
-            .map(HoaRepresentation::from_parsed)
+            .try_map(|(header, raw_states), span| {
+                let num_aps = header
+                    .iter()
+                    .find_map(|i| match i {
+                        HeaderItem::AP(aps) => Some(aps.len()),
+                        _ => None,
+                    })
+                    .unwrap_or(0);
+                let num_aps = u16::try_from(num_aps)
+                    .map_err(|_| Simple::custom(span.clone(), "too many atomic propositions"))?;
+                let states = raw_states
+                    .into_iter()
+                    .map(|s| s.resolve(num_aps))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| Simple::custom(span, e))?;
+                Ok(HoaRepresentation::from_parts(header, states.into()))
+            })
     }
 
     /// Creates a new HOA automaton from the given version, header and
@@ -544,6 +557,49 @@ State: 0
         let cyclic = ALIASED.replace("Alias: @x 0 & 1", "Alias: @x @y");
         let mut aut = HoaRepresentation::try_from(cyclic.as_str()).unwrap();
         assert!(aut.unalias().unwrap_err().contains("itself"));
+    }
+
+    fn with_body(body: &str) -> String {
+        format!(
+            "HOA: v1\nStates: 2\nStart: 0\nAP: 2 \"a\" \"b\"\nAcceptance: 1 Inf(0)\n--BODY--\n{body}\n--END--"
+        )
+    }
+
+    #[test]
+    fn implicit_labels_equal_explicit_labels() {
+        let implicit = with_body("State: 0\n1 {0}\n0\n1\n1\nState: 1\n0\n0\n0\n0");
+        let explicit = with_body(
+            "State: 0\n[!0 & !1] 1 {0}\n[0 & !1] 0\n[!0 & 1] 1\n[0 & 1] 1\n\
+             State: 1\n[!0 & !1] 0\n[0 & !1] 0\n[!0 & 1] 0\n[0 & 1] 0",
+        );
+        assert_eq!(
+            HoaRepresentation::try_from(implicit.as_str()).unwrap(),
+            HoaRepresentation::try_from(explicit.as_str()).unwrap()
+        );
+    }
+
+    #[test]
+    fn state_labels_equal_transition_labels() {
+        let state_labels = with_body("State: [0] 0\n0 {0}\n1\nState: [!0 & 1] 1\n0");
+        let explicit = with_body("State: 0\n[0] 0 {0}\n[0] 1\nState: 1\n[!0 & 1] 0");
+        assert_eq!(
+            HoaRepresentation::try_from(state_labels.as_str()).unwrap(),
+            HoaRepresentation::try_from(explicit.as_str()).unwrap()
+        );
+    }
+
+    #[test]
+    fn invalid_label_combinations_are_errors() {
+        for (body, msg) in [
+            ("State: 0\n[0] 0\n1", "mixes labelled and unlabelled"),
+            ("State: [0] 0\n[1] 0", "must not have labels"),
+            ("State: 0\n0\n1\n0", "exactly 2^2 edges"),
+        ] {
+            let err = HoaRepresentation::try_from(with_body(body).as_str())
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(msg), "{body}: {err}");
+        }
     }
 
     #[test]
