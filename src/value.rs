@@ -24,8 +24,12 @@ pub fn boolean() -> impl Parser<Token, bool, Error = Simple<Token>> + Clone {
 #[allow(clippy::result_large_err)]
 pub fn integer() -> impl Parser<Token, Id, Error = Simple<Token>> + Clone {
     select! {
-        Token::Int(n) => n.parse().unwrap(),
+        Token::Int(n) => n,
     }
+    .try_map(|n, span| {
+        n.parse::<Id>()
+            .map_err(|_| Simple::custom(span, "integer out of range"))
+    })
 }
 
 #[allow(clippy::result_large_err)]
@@ -61,17 +65,26 @@ pub fn acceptance_signature() -> impl Parser<Token, AcceptanceSignature, Error =
 
 #[allow(clippy::result_large_err)]
 pub fn acceptance_info() -> impl Parser<Token, AcceptanceInfo, Error = Simple<Token>> {
-    select! {
-        Token::Identifier(ident) => AcceptanceInfo::Identifier(ident),
-        Token::Int(n) => AcceptanceInfo::Int(n.parse().unwrap())
-    }
+    identifier()
+        .map(AcceptanceInfo::Identifier)
+        .or(integer().map(AcceptanceInfo::Int))
+}
+
+/// Parses an atomic proposition identifier in a label expression.
+#[allow(clippy::result_large_err)]
+fn ap_index() -> impl Parser<Token, AbstractLabelExpression, Error = Simple<Token>> + Clone {
+    integer().try_map(|i, span| {
+        u16::try_from(i)
+            .map(AbstractLabelExpression::Integer)
+            .map_err(|_| Simple::custom(span, "AP identifier out of range"))
+    })
 }
 
 pub fn label_expression() -> impl Parser<Token, AbstractLabelExpression, Error = Simple<Token>> {
     recursive(|label_expression| {
         let value = boolean()
             .map(AbstractLabelExpression::Boolean)
-            .or(integer().map(|i| AbstractLabelExpression::Integer(i as u16)));
+            .or(ap_index());
         // .or(alias_name().map(|aname| LabelExpression::Alias(AliasName(aname))));
 
         let atom = value

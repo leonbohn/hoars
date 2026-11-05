@@ -1,5 +1,4 @@
-use biodivine_lib_bdd::{Bdd, BddPartialValuation, BddVariable, BddVariableSet};
-use itertools::Itertools;
+use biodivine_lib_bdd::{Bdd, BddVariable, BddVariableSet};
 use std::ops::Deref;
 
 /// Newtype wrapper around a [`crate::LabelExpression`], implements [`Deref`].
@@ -23,80 +22,38 @@ pub enum AbstractLabelExpression {
     Disjunction(Vec<AbstractLabelExpression>),
 }
 
-pub(crate) enum Atomic {
-    Positive(u16),
-    Negative(u16),
-}
-
-impl Atomic {
-    pub(crate) fn to_value(&self, vars: &[BddVariable]) -> (BddVariable, bool) {
-        match self {
-            Atomic::Positive(i) => (vars[*i as usize], true),
-            Atomic::Negative(i) => (vars[*i as usize], false),
-        }
-    }
-}
-
 impl AbstractLabelExpression {
-    pub(crate) fn try_atom(&self) -> Option<Atomic> {
-        match self {
-            AbstractLabelExpression::Integer(i) => Some(Atomic::Positive(*i)),
-            AbstractLabelExpression::Negated(bx) => match **bx {
-                AbstractLabelExpression::Integer(i) => Some(Atomic::Negative(i)),
-                _ => None,
-            },
-            _ => None,
-        }
-    }
-
-    pub fn try_into_prop(self, num_aps: u8) -> Result<HoaExpression, String> {
-        let var_set = BddVariableSet::new_anonymous(num_aps as u16);
-        let vars: Vec<_> = (0..num_aps)
-            .map(|i| BddVariable::from_index(i as usize))
-            .collect();
-        let bdd = self.try_into_bdd(&var_set, &vars)?;
-        Ok(bdd)
-    }
-
-    pub fn try_into_bdd(self, vs: &BddVariableSet, vars: &[BddVariable]) -> Result<Bdd, String> {
+    /// Converts this expression into a [`Bdd`], using the variables of `vs`.
+    ///
+    /// The variable for AP `i` is `BddVariable::from_index(i)`, so `vs` must have at
+    /// least as many variables as the largest AP identifier used in this expression.
+    pub fn try_into_bdd(&self, vs: &BddVariableSet) -> Result<Bdd, String> {
         match self {
             AbstractLabelExpression::Boolean(b) => Ok(match b {
                 true => vs.mk_true(),
                 false => vs.mk_false(),
             }),
             AbstractLabelExpression::Integer(i) => {
-                if i < vs.num_vars() {
-                    Ok(vs.mk_var(vars[i as usize]))
+                if *i < vs.num_vars() {
+                    Ok(vs.mk_var(BddVariable::from_index(*i as usize)))
                 } else {
                     Err(format!("AP identifier {i} is too high"))
                 }
             }
-            AbstractLabelExpression::Negated(e) => Ok(e.try_into_bdd(vs, vars)?.not()),
-            AbstractLabelExpression::Conjunction(cs) => {
-                if let Some(ints) = cs.iter().map(|c| c.try_atom()).collect::<Option<Vec<_>>>() {
-                    let valuation = BddPartialValuation::from_values(
-                        &ints.into_iter().map(|a| a.to_value(vars)).collect_vec(),
-                    );
-                    Ok(vs.mk_conjunctive_clause(&valuation))
-                } else {
-                    Err(format!(
-                        "could not parse label expression conjunct {cs:?}, expected atom"
-                    ))
-                }
-            }
-            AbstractLabelExpression::Disjunction(ds) => {
-                if let Some(ints) = ds.iter().map(|c| c.try_atom()).collect::<Option<Vec<_>>>() {
-                    let valuation = BddPartialValuation::from_values(
-                        &ints.into_iter().map(|a| a.to_value(vars)).collect_vec(),
-                    );
-                    Ok(vs.mk_disjunctive_clause(&valuation))
-                } else {
-                    Err(format!(
-                        "could not parse label expression disjunct {ds:?}, expected atom"
-                    ))
-                }
-            }
+            AbstractLabelExpression::Negated(e) => Ok(e.try_into_bdd(vs)?.not()),
+            AbstractLabelExpression::Conjunction(cs) => cs
+                .iter()
+                .try_fold(vs.mk_true(), |acc, c| Ok(acc.and(&c.try_into_bdd(vs)?))),
+            AbstractLabelExpression::Disjunction(ds) => ds
+                .iter()
+                .try_fold(vs.mk_false(), |acc, d| Ok(acc.or(&d.try_into_bdd(vs)?))),
         }
+    }
+
+    /// Converts this expression into a [`Bdd`] over `num_aps` anonymous variables.
+    pub fn try_into_prop(&self, num_aps: u16) -> Result<HoaExpression, String> {
+        let var_set = BddVariableSet::new_anonymous(num_aps);
+        self.try_into_bdd(&var_set)
     }
 }
 
@@ -125,17 +82,12 @@ pub enum LabelExpression {
 }
 
 impl LabelExpression {
-    pub fn try_into_hoa_expression(self, num_aps: u8) -> Result<HoaExpression, String> {
+    pub fn try_into_hoa_expression(self, num_aps: u16) -> Result<HoaExpression, String> {
         match self {
             LabelExpression::Expression(b) => Ok(b),
             LabelExpression::Abstract(b) => b.try_into_prop(num_aps),
         }
     }
-}
-pub fn build_vars(count: u16) -> (BddVariableSet, Vec<BddVariable>) {
-    let vs = BddVariableSet::new_anonymous(count);
-    let vars = vs.variables().into_iter().take(count as usize).collect();
-    (vs, vars)
 }
 
 #[cfg(test)]
@@ -207,5 +159,56 @@ impl Anonymous<true> {
     }
     pub fn top_label() -> Label {
         Label(Self::top_expr())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn card(expr: &AbstractLabelExpression, num_aps: u16) -> f64 {
+        expr.try_into_prop(num_aps)
+            .expect("label should convert")
+            .cardinality()
+    }
+
+    fn int(i: u16) -> Box<AbstractLabelExpression> {
+        Box::new(Integer(i))
+    }
+
+    fn not(e: Box<AbstractLabelExpression>) -> AbstractLabelExpression {
+        Negated(e)
+    }
+
+    #[test]
+    fn composite_expressions_are_converted() {
+        // 0&!1 | !0&1
+        let xor = Disjunction(vec![
+            Conjunction(vec![Integer(0), not(int(1))]),
+            Conjunction(vec![not(int(0)), Integer(1)]),
+        ]);
+        assert_eq!(2.0, card(&xor, 2));
+
+        // (0|1)&!1 == 0&!1
+        let expr = Conjunction(vec![Disjunction(vec![Integer(0), Integer(1)]), not(int(1))]);
+        assert_eq!(1.0, card(&expr, 2));
+
+        // 0&t == 0
+        let expr = Conjunction(vec![Integer(0), Boolean(true)]);
+        assert_eq!(2.0, card(&expr, 2));
+
+        // 0&!0 == f
+        let expr = Conjunction(vec![Integer(0), not(int(0))]);
+        assert_eq!(0.0, card(&expr, 2));
+
+        assert_eq!(4.0, card(&Boolean(true), 2));
+        assert_eq!(0.0, card(&Boolean(false), 2));
+    }
+
+    #[test]
+    fn out_of_bounds_ap_is_an_error() {
+        let expr = Conjunction(vec![Integer(0), not(int(7))]);
+        assert!(expr.try_into_prop(2).is_err());
+        assert!(Integer(7).try_into_prop(2).is_err());
     }
 }

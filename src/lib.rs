@@ -11,7 +11,7 @@ mod value;
 pub mod label;
 pub use label::{
     AbstractLabelExpression, HoaAlphabet, HoaExpression, HoaRepr, HoaSymbol, Label,
-    LabelExpression, MAX_APS, build_vars,
+    LabelExpression, MAX_APS,
 };
 
 use tracing::warn;
@@ -171,32 +171,16 @@ impl HoaRepresentation {
         }
     }
 
-    /// Returns the number of states in the automaton.
+    /// Returns the number of states in the automaton, if the header states it.
     pub fn num_states(&self) -> Option<usize> {
-        debug_assert!(
-            self.header()
-                .iter()
-                .filter(|item| matches!(item, HeaderItem::States(_)))
-                .count()
-                == 1,
-            "The number of states must be set exactly once!"
-        );
         self.header().iter().find_map(|item| match item {
             HeaderItem::States(id) => Some(*id as usize),
             _ => None,
         })
     }
 
-    /// Returns the start state conjunction.
+    /// Returns the start state conjunctions of the automaton, which may be empty.
     pub fn start(&self) -> Vec<&StateConjunction> {
-        debug_assert!(
-            self.header()
-                .iter()
-                .filter(|item| matches!(item, HeaderItem::Start(_)))
-                .count()
-                >= 1,
-            "At least one initial state conjunction has to be present!"
-        );
         self.header()
             .iter()
             .filter_map(|item| match item {
@@ -206,47 +190,37 @@ impl HoaRepresentation {
             .collect()
     }
 
-    /// Returns the set of all atomic propositions in the automaton.
-    pub fn aps(&self) -> &Vec<String> {
-        let aps = self
-            .header()
-            .iter()
-            .filter_map(|item| match item {
-                HeaderItem::AP(ap) => Some(ap),
-                _ => None,
-            })
-            .collect_vec();
-        debug_assert!(aps.len() == 1, "There must be exactly one AP header!");
-        aps.first().unwrap()
-    }
-
-    /// Counts the number of atomic propositions in the automaton.
-    pub fn num_aps(&self) -> u8 {
-        self.aps()
-            .len()
-            .try_into()
-            .expect("Could not fit number of aps in u8!")
-    }
-
-    /// Returns the acceptance condition of the automaton.
-    pub fn acceptance(&self) -> HoaAcceptance {
-        debug_assert!(
-            self.header()
-                .iter()
-                .filter(|item| matches!(item, HeaderItem::Acceptance(..)))
-                .count()
-                == 1,
-            "There must be exactly one Acceptance header!"
-        );
+    /// Returns the set of all atomic propositions in the automaton, which is empty
+    /// when the header has no `AP:` item.
+    pub fn aps(&self) -> &[String] {
         self.header()
             .iter()
             .find_map(|item| match item {
-                HeaderItem::Acceptance(acceptance_sets, condition) => {
-                    Some((*acceptance_sets as usize, condition.clone()))
-                }
+                HeaderItem::AP(aps) => Some(aps.as_slice()),
                 _ => None,
             })
-            .expect("Acceptance header is missing!")
+            .unwrap_or_default()
+    }
+
+    /// Counts the number of atomic propositions in the automaton.
+    ///
+    /// # Panics
+    ///
+    /// If there are more than [`u16::MAX`] atomic propositions, which BDDs cannot
+    /// represent anyway.
+    pub fn num_aps(&self) -> u16 {
+        u16::try_from(self.aps().len())
+            .expect("more than u16::MAX atomic propositions are not supported")
+    }
+
+    /// Returns the acceptance condition of the automaton, if the header has one.
+    pub fn acceptance(&self) -> Option<HoaAcceptance> {
+        self.header().iter().find_map(|item| match item {
+            HeaderItem::Acceptance(acceptance_sets, condition) => {
+                Some((*acceptance_sets as usize, condition.clone()))
+            }
+            _ => None,
+        })
     }
 
     /// Returns the aliases of the automaton.
@@ -260,16 +234,8 @@ impl HoaRepresentation {
             .collect()
     }
 
-    /// Returns the acceptance name of the automaton.
+    /// Returns the acceptance name of the automaton, if the header has one.
     pub fn acceptance_name(&self) -> Option<(&AcceptanceName, &Vec<AcceptanceInfo>)> {
-        debug_assert!(
-            self.header()
-                .iter()
-                .filter(|item| matches!(item, HeaderItem::AcceptanceName(..)))
-                .count()
-                == 1,
-            "There must be exactly one AcceptanceName header!"
-        );
         self.header().iter().find_map(|item| match item {
             HeaderItem::AcceptanceName(name, info) => Some((name, info)),
             _ => None,
@@ -298,6 +264,9 @@ impl TryFrom<&str> for HoaRepresentation {
 
 impl std::fmt::Display for AbstractLabelExpression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `&` binds tighter than `|`, and `!` applies to a single atom, so a
+        // disjunction inside a conjunction and a non-atom inside a negation
+        // have to be parenthesised to keep the meaning.
         match self {
             AbstractLabelExpression::Boolean(b) => match b {
                 true => write!(f, "t"),
@@ -305,32 +274,44 @@ impl std::fmt::Display for AbstractLabelExpression {
             },
             AbstractLabelExpression::Integer(i) => write!(f, "{i}"),
             AbstractLabelExpression::Negated(expr) => {
-                write!(f, "!{}", expr)
+                if is_atom(expr) {
+                    write!(f, "!{}", expr)
+                } else {
+                    write!(f, "!({})", expr)
+                }
             }
             AbstractLabelExpression::Conjunction(conjuncts) => {
-                let mut it = conjuncts.iter();
-                if let Some(first) = it.next() {
-                    Display::fmt(first, f)?;
+                if conjuncts.is_empty() {
+                    return write!(f, "t");
                 }
-                for succ in it {
-                    write!(f, " & ")?;
-                    Display::fmt(succ, f)?;
+                for (i, conjunct) in conjuncts.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " & ")?;
+                    }
+                    if matches!(conjunct, AbstractLabelExpression::Disjunction(_)) {
+                        write!(f, "({})", conjunct)?;
+                    } else {
+                        write!(f, "{}", conjunct)?;
+                    }
                 }
                 Ok(())
             }
             AbstractLabelExpression::Disjunction(disjuncts) => {
-                let mut it = disjuncts.iter();
-                if let Some(first) = it.next() {
-                    Display::fmt(first, f)?;
+                if disjuncts.is_empty() {
+                    return write!(f, "f");
                 }
-                for succ in it {
-                    write!(f, " | ")?;
-                    Display::fmt(succ, f)?;
-                }
-                Ok(())
+                write!(f, "{}", disjuncts.iter().format(" | "))
             }
         }
     }
+}
+
+/// Whether `expr` can be used as the argument of a negation without parentheses.
+fn is_atom(expr: &AbstractLabelExpression) -> bool {
+    matches!(
+        expr,
+        AbstractLabelExpression::Boolean(_) | AbstractLabelExpression::Integer(_)
+    )
 }
 
 fn build_error_report<I: Iterator<Item = Simple<String>>>(input: &str, errs: I) -> String {
@@ -417,18 +398,23 @@ fn print_error_report<I: Iterator<Item = Simple<String>>>(input: &str, errs: I) 
     tracing::error!("{}", build_error_report(input, errs))
 }
 
+/// Returns the byte index just past the `--END--` that terminates the first
+/// automaton in `input` that was not aborted.
+///
+/// An `--ABORT--` discards the automaton it terminates, so aborted automata
+/// never contribute a position; the search continues after the abort. Returns
+/// `None` if no `--END--` follows the last abort.
 pub fn first_automaton_split_position(input: &str) -> Option<usize> {
     const ENDLEN: usize = "--END--".len();
+    const ABORTLEN: usize = "--ABORT--".len();
 
-    'outer: loop {
-        {
-            let end = input.find("--END--")?;
-            if let Some(abort) = input.find("--ABORT--")
-                && abort < end
-            {
-                continue 'outer;
-            }
-            return Some(end + ENDLEN);
+    let mut cursor = 0;
+    loop {
+        let rest = &input[cursor..];
+        let end = cursor + rest.find("--END--")?;
+        match rest.find("--ABORT--") {
+            Some(abort) if cursor + abort < end => cursor += abort + ABORTLEN,
+            _ => return Some(end + ENDLEN),
         }
     }
 }
@@ -453,11 +439,63 @@ mod tests {
 
     use crate::{
         AcceptanceAtom, AcceptanceCondition, AcceptanceName, AcceptanceSignature, Body, HeaderItem,
-        HoaRepresentation, StateConjunction,
+        HoaBool, HoaRepresentation, StateConjunction,
         body::{Edge, State},
         header::Header,
         label::AnonymousAbstract,
     };
+
+    #[test]
+    fn integer_overflow_is_a_parse_error() {
+        let contents = "HOA: v1\nStates: 99999999999\n--BODY--\n--END--";
+        let err = HoaRepresentation::try_from(contents)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("integer out of range"), "{err}");
+    }
+
+    #[test]
+    fn out_of_range_ap_identifier_is_a_parse_error() {
+        let contents =
+            "HOA: v1\nAP: 1 \"a\"\nAcceptance: 0 t\n--BODY--\nState: 0\n[65536] 0\n--END--";
+        let err = HoaRepresentation::try_from(contents)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("AP identifier out of range"), "{err}");
+    }
+
+    #[test]
+    fn accessors_work_without_optional_headers() {
+        let contents = "HOA: v1\nAcceptance: 0 t\n--BODY--\n--END--";
+        let aut = HoaRepresentation::try_from(contents).expect("minimal automaton parses");
+
+        assert_eq!("v1", aut.version());
+        assert_eq!(None, aut.num_states());
+        assert!(aut.start().is_empty());
+        assert!(aut.aps().is_empty());
+        assert_eq!(0, aut.num_aps());
+        assert_eq!(
+            Some((0, AcceptanceCondition::Boolean(HoaBool(true)))),
+            aut.acceptance()
+        );
+        assert_eq!(None, aut.acceptance_name());
+        assert!(aut.header().acceptance_name().is_none());
+        assert!(aut.aliases().is_empty());
+        assert_eq!(Ok(()), aut.verify());
+    }
+
+    #[test]
+    fn accessors_work_on_default_automaton() {
+        let aut = HoaRepresentation::default();
+        assert_eq!("v1", aut.version());
+        assert_eq!(None, aut.num_states());
+        assert!(aut.start().is_empty());
+        assert!(aut.aps().is_empty());
+        assert_eq!(0, aut.num_aps());
+        assert_eq!(None, aut.acceptance());
+        assert_eq!(None, aut.acceptance_name());
+        assert_eq!(Ok(()), aut.verify());
+    }
 
     #[test]
     fn first_automaton_split_and_abort() {
@@ -465,6 +503,32 @@ mod tests {
 
         let first = super::first_automaton_split_position(contents);
         assert_eq!(first, Some(15));
+    }
+
+    #[test]
+    fn first_automaton_abort_before_end() {
+        let contents = "--ABORT--\n--END--";
+
+        let first = super::first_automaton_split_position(contents);
+        assert_eq!(first, Some(contents.len()));
+    }
+
+    #[test]
+    fn first_automaton_multiple_aborts() {
+        let contents = "--ABORT--\nHOA: v1\n--ABORT--\nHOA: v1\n--END--";
+
+        let first = super::first_automaton_split_position(contents);
+        assert_eq!(first, Some(contents.len()));
+    }
+
+    #[test]
+    fn first_automaton_abort_and_no_end() {
+        assert_eq!(super::first_automaton_split_position("--ABORT--\n"), None);
+        assert_eq!(
+            super::first_automaton_split_position("--ABORT--\n--ABORT--\n"),
+            None
+        );
+        assert_eq!(super::first_automaton_split_position("HOA: v1\n"), None);
     }
 
     #[test]
