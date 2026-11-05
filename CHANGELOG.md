@@ -5,8 +5,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `HoaRepresentation::validate`, run by the parser, with the new `FromHoaError::Invalid(ValidationError)`. It rejects a missing `Acceptance:`, repeated `States:`/`AP:`/`acc-name:`/`tool:`/`name:`/`Acceptance:` items, and acceptance sets, states and APs beyond the declared counts. Unsupported versions now give `FromHoaError::UnsupportedVersion`; `v1` and `v1.x` are accepted (the lexer accepts dotted versions such as `v1.1`).
+- Implicit edge labels and state labels. A state without label whose edges have none needs exactly `2^|AP|` edges (edge `i` gets the label where AP `j` holds iff bit `j` of `i` is set); a state label is copied onto each of its outgoing edges; mixing labelled and unlabelled edges is a parse error. Implicit and state-labelled automata parse to the same `HoaRepresentation` as their explicit equivalents.
+- Alias references (`@name`) in label expressions: `AbstractLabelExpression::Alias(String)`. `HoaRepresentation::unalias` substitutes them recursively in the aliases and in all edge labels and reports undefined or cyclic aliases. Parsing does not unalias; BDD conversion of an unresolved alias returns an error.
+- `HeaderItem::Unknown(name, values)` (with `UnknownValue`): unknown header items such as `controllable-AP:` or `spot.state-player:` are now parsed, kept, and written back out instead of being a parse error. Unknown names starting with an uppercase letter log a `tracing` warning. Header names may now contain `.`.
+
 ### Changed
 
+- Lexer: strings follow the spec's C-like syntax (`\"` and `\\` are decoded, other escapes are kept verbatim), comments nest, and `--ABORT--` lexes as `Token::Abort` (it used to be `Token::BodyEnd`). `Token::Bool` is gone; `t`/`f` are identifiers.
+- `--ABORT--` handling works on tokens instead of substrings: `from_hoa` only rejects real aborts (not one inside a string, nor `foo--ABORT--`), and `parse_hoa_automata` and `first_automaton_split_position` lex the input once and split the token stream, so an automaton following an aborted one in the same chunk is returned. A lexer error now makes `parse_hoa_automata` return nothing, and `first_automaton_split_position` return `None`.
+- `Property` and `AcceptanceName` gained an `Other(String)` variant, and their `TryFrom<String>` impls became infallible `From<String>`. Unknown `properties:` values (e.g. `semi-deterministic`) and `acc-name:` names (e.g. `Rabin-like`) now parse and are written back verbatim.
 - Accessors no longer `debug_assert` header multiplicities that the HOA spec does not require, so they work on valid files without `States:`, `Start:`, `acc-name:` or `AP:`:
   - `HoaRepresentation::aps` returns `&[String]` (was `&Vec<String>`) and is empty when the header has no `AP:`;
   - `num_aps` returns `u16` (was `u8`, which panicked above 255 APs);

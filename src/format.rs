@@ -104,6 +104,21 @@ pub enum AcceptanceCondition {
 }
 
 impl AcceptanceCondition {
+    /// All acceptance sets mentioned in this condition.
+    pub(crate) fn sets(&self) -> Vec<Id> {
+        match self {
+            Self::Fin(a) | Self::Inf(a) => match a {
+                AcceptanceAtom::Positive(i) | AcceptanceAtom::Negative(i) => vec![*i],
+            },
+            Self::And(l, r) | Self::Or(l, r) => {
+                let mut sets = l.sets();
+                sets.extend(r.sets());
+                sets
+            }
+            Self::Boolean(_) => Vec::new(),
+        }
+    }
+
     fn parity_rec(current: u32, total: u32) -> Self {
         if current + 1 >= total {
             if current.rem(2) == 0 {
@@ -206,6 +221,8 @@ pub enum AcceptanceName {
     All,
     /// A condition where nothing is accepted.
     None,
+    /// Any other name (e.g. Spot's `Rabin-like`), kept verbatim.
+    Other(String),
 }
 
 impl AcceptanceName {
@@ -214,22 +231,20 @@ impl AcceptanceName {
     }
 }
 
-impl TryFrom<String> for AcceptanceName {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
+impl From<String> for AcceptanceName {
+    fn from(value: String) -> Self {
         match value.as_str() {
-            "Buchi" => Ok(AcceptanceName::Buchi),
-            "generalized-Buchi" => Ok(AcceptanceName::GeneralizedBuchi),
-            "co-Buchi" => Ok(AcceptanceName::CoBuchi),
-            "generalized-co-Buchi" => Ok(AcceptanceName::GeneralizedCoBuchi),
-            "Streett" => Ok(AcceptanceName::Streett),
-            "Rabin" => Ok(AcceptanceName::Rabin),
-            "generalized-Rabin" => Ok(AcceptanceName::GeneralizedRabin),
-            "parity" => Ok(AcceptanceName::Parity),
-            "all" => Ok(AcceptanceName::All),
-            "none" => Ok(AcceptanceName::None),
-            val => Err(format!("Unknown acceptance type: {}", val)),
+            "Buchi" => AcceptanceName::Buchi,
+            "generalized-Buchi" => AcceptanceName::GeneralizedBuchi,
+            "co-Buchi" => AcceptanceName::CoBuchi,
+            "generalized-co-Buchi" => AcceptanceName::GeneralizedCoBuchi,
+            "Streett" => AcceptanceName::Streett,
+            "Rabin" => AcceptanceName::Rabin,
+            "generalized-Rabin" => AcceptanceName::GeneralizedRabin,
+            "parity" => AcceptanceName::Parity,
+            "all" => AcceptanceName::All,
+            "none" => AcceptanceName::None,
+            _ => AcceptanceName::Other(value),
         }
     }
 }
@@ -257,32 +272,32 @@ pub enum Property {
     Terminal,
     Tight,
     Colored,
+    /// Any other property (e.g. Spot's `semi-deterministic`), kept verbatim.
+    Other(String),
 }
 
-impl TryFrom<String> for Property {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
+impl From<String> for Property {
+    fn from(value: String) -> Self {
         match value.as_str() {
-            "state-labels" => Ok(Property::StateLabels),
-            "trans-labels" => Ok(Property::TransLabels),
-            "implicit-labels" => Ok(Property::ImplicitLabels),
-            "explicit-labels" => Ok(Property::ExplicitLabels),
-            "state-acc" => Ok(Property::StateAcceptance),
-            "trans-acc" => Ok(Property::TransitionAcceptance),
-            "univ-branch" => Ok(Property::UniversalBranching),
-            "no-univ-branch" => Ok(Property::NoUniversalBranching),
-            "deterministic" => Ok(Property::Deterministic),
-            "complete" => Ok(Property::Complete),
-            "unambiguous" => Ok(Property::Unambiguous),
-            "stutter-invariant" => Ok(Property::StutterInvariant),
-            "weak" => Ok(Property::Weak),
-            "very-weak" => Ok(Property::VeryWeak),
-            "inherently-weak" => Ok(Property::InherentlyWeak),
-            "terminal" => Ok(Property::Terminal),
-            "tight" => Ok(Property::Tight),
-            "colored" => Ok(Property::Colored),
-            unknown => Err(format!("{} is not a valid property", unknown)),
+            "state-labels" => Property::StateLabels,
+            "trans-labels" => Property::TransLabels,
+            "implicit-labels" => Property::ImplicitLabels,
+            "explicit-labels" => Property::ExplicitLabels,
+            "state-acc" => Property::StateAcceptance,
+            "trans-acc" => Property::TransitionAcceptance,
+            "univ-branch" => Property::UniversalBranching,
+            "no-univ-branch" => Property::NoUniversalBranching,
+            "deterministic" => Property::Deterministic,
+            "complete" => Property::Complete,
+            "unambiguous" => Property::Unambiguous,
+            "stutter-invariant" => Property::StutterInvariant,
+            "weak" => Property::Weak,
+            "very-weak" => Property::VeryWeak,
+            "inherently-weak" => Property::InherentlyWeak,
+            "terminal" => Property::Terminal,
+            "tight" => Property::Tight,
+            "colored" => Property::Colored,
+            _ => Property::Other(value),
         }
     }
 }
@@ -317,8 +332,8 @@ mod tests {
     fn terminal_property_is_parsed() {
         // the spelling "terminal" is the one that the writer produces
         assert_eq!(
-            super::Property::try_from("terminal".to_string()),
-            Ok(super::Property::Terminal)
+            super::Property::from("terminal".to_string()),
+            super::Property::Terminal
         );
     }
 

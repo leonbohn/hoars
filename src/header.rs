@@ -35,6 +35,20 @@ pub enum HeaderItem {
     Name(String),
     /// (>=0) Gives the properties of the automaton.
     Properties(Vec<Property>),
+    /// A header item this crate does not know. The spec allows ignoring those
+    /// whose name starts with a lowercase letter; they are kept to allow round-tripping.
+    Unknown(String, Vec<UnknownValue>),
+}
+
+/// A value of an [`HeaderItem::Unknown`] header item.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum UnknownValue {
+    /// An integer.
+    Int(String),
+    /// A quoted string (without the quotes).
+    Text(String),
+    /// An identifier.
+    Identifier(String),
 }
 
 impl HeaderItem {
@@ -78,9 +92,7 @@ fn item() -> impl Parser<Token, HeaderItem, Error = Simple<Token>> {
 
     let acceptance_name = just(Token::Header("acc-name".to_string()))
         .ignore_then(value::identifier())
-        .try_map(|identifier, span| {
-            AcceptanceName::try_from(identifier).map_err(|e| Simple::custom(span, e))
-        })
+        .map(AcceptanceName::from)
         .then(value::acceptance_info().repeated())
         .map(|(name, info)| HeaderItem::AcceptanceName(name, info));
 
@@ -124,11 +136,38 @@ fn item() -> impl Parser<Token, HeaderItem, Error = Simple<Token>> {
     let properties = just(Token::Header("properties".to_string()))
         .ignore_then(
             value::identifier()
-                .try_map(|p, span| Property::try_from(p).map_err(|err| Simple::custom(span, err)))
+                .map(Property::from)
                 .repeated()
                 .at_least(1),
         )
         .map(HeaderItem::Properties);
+
+    const KNOWN: [&str; 9] = [
+        "HOA",
+        "States",
+        "Start",
+        "AP",
+        "Alias",
+        "Acceptance",
+        "acc-name",
+        "tool",
+        "name",
+    ];
+    let unknown = select! { Token::Header(name) if !KNOWN.contains(&name.as_str()) && name != "properties" => name }
+        .then(
+            select! {
+                Token::Int(i) => UnknownValue::Int(i),
+                Token::Text(t) => UnknownValue::Text(t),
+                Token::Identifier(i) => UnknownValue::Identifier(i),
+            }
+            .repeated(),
+        )
+        .map(|(name, values)| {
+            if name.starts_with(|c: char| c.is_ascii_uppercase()) {
+                tracing::warn!("ignoring unknown header item {name}");
+            }
+            HeaderItem::Unknown(name, values)
+        });
 
     chumsky::primitive::choice((
         states,
@@ -140,6 +179,7 @@ fn item() -> impl Parser<Token, HeaderItem, Error = Simple<Token>> {
         name,
         tool,
         properties,
+        unknown,
     ))
 }
 
@@ -276,7 +316,26 @@ mod tests {
                 HeaderItem::Properties(vec![Property::TransLabels, Property::StateLabels]),
             ],
         );
-        assert_fails(r#"properties: trans-labels statelabels"#);
+        assert_header(
+            "properties: trans-labels semi-deterministic",
+            &[
+                HeaderItem::Version("v1".into()),
+                HeaderItem::Properties(vec![
+                    Property::TransLabels,
+                    Property::Other("semi-deterministic".into()),
+                ]),
+            ],
+        );
+        assert_header(
+            "acc-name: Rabin-like 1",
+            &[
+                HeaderItem::Version("v1".into()),
+                HeaderItem::AcceptanceName(
+                    AcceptanceName::Other("Rabin-like".into()),
+                    vec![AcceptanceInfo::Int(1)],
+                ),
+            ],
+        );
         assert_fails(r#"properties: "#);
     }
 
@@ -294,6 +353,47 @@ mod tests {
             ],
         );
         assert_fails("tool: ltl-translate \"1.2-alpha\"");
+    }
+
+    #[test]
+    fn unknown_items() {
+        assert_header(
+            "controllable-AP: 0 1\nspot.state-player: 0 1 1\nFoo: \"x\" bar",
+            &[
+                HeaderItem::Version("v1".into()),
+                HeaderItem::Unknown(
+                    "controllable-AP".into(),
+                    vec![UnknownValue::Int("0".into()), UnknownValue::Int("1".into())],
+                ),
+                HeaderItem::Unknown(
+                    "spot.state-player".into(),
+                    vec![
+                        UnknownValue::Int("0".into()),
+                        UnknownValue::Int("1".into()),
+                        UnknownValue::Int("1".into()),
+                    ],
+                ),
+                HeaderItem::Unknown(
+                    "Foo".into(),
+                    vec![
+                        UnknownValue::Text("x".into()),
+                        UnknownValue::Identifier("bar".into()),
+                    ],
+                ),
+            ],
+        );
+    }
+
+    #[test]
+    fn unknown_items_round_trip() {
+        let hoa = "HOA: v1\nStates: 1\nStart: 0\nAP: 0\nAcceptance: 0 t\ncontrollable-AP: 0 1\nspot.state-player: 0\n--BODY--\nState: 0\n--END--";
+        let aut = crate::parse_hoa_automata(hoa).remove(0);
+        let out = crate::output::to_hoa(&aut);
+        assert!(out.contains("controllable-AP: 0 1\nspot.state-player: 0\n--BODY--"));
+        assert_eq!(
+            crate::parse_hoa_automata(&out).remove(0).header(),
+            aut.header()
+        );
     }
 
     #[test]
@@ -329,74 +429,40 @@ mod tests {
         )
     }
 
-    // #[test]
-    // fn alias() {
-    // assert_header(
-    //     "Alias: @a 0",
-    //     &[
-    //         HeaderItem::Version("v1".to_string()),
-    //         HeaderItem::Alias(AliasName("a".to_string()), LabelExpression::Integer(0)),
-    //     ],
-    // );
-    //     assert_header(
-    //         "Alias: @a 0 & 1",
-    //         &[
-    //             HeaderItem::Version("v1".to_string()),
-    //             HeaderItem::Alias(
-    //                 AliasName("a".to_string()),
-    //                 LabelExpression::And(
-    //                     Box::new(LabelExpression::Integer(0)),
-    //                     Box::new(LabelExpression::Integer(1)),
-    //                 ),
-    //             ),
-    //         ],
-    //     );
-
-    //     // & binds stronger
-    //     assert_header(
-    //         "Alias: @a 1 | 2 & 0",
-    //         &[
-    //             HeaderItem::Version("v1".to_string()),
-    //             HeaderItem::Alias(
-    //                 AliasName("a".to_string()),
-    //                 LabelExpression::Or(
-    //                     Box::new(LabelExpression::Integer(1)),
-    //                     Box::new(LabelExpression::And(
-    //                         Box::new(LabelExpression::Integer(2)),
-    //                         Box::new(LabelExpression::Integer(0)),
-    //                     )),
-    //                 ),
-    //             ),
-    //         ],
-    //     );
-    //     assert_header(
-    //         "Alias: @a 0 & 1 | 2",
-    //         &[
-    //             HeaderItem::Version("v1".to_string()),
-    //             HeaderItem::Alias(
-    //                 AliasName("a".to_string()),
-    //                 LabelExpression::Or(
-    //                     Box::new(LabelExpression::And(
-    //                         Box::new(LabelExpression::Integer(0)),
-    //                         Box::new(LabelExpression::Integer(1)),
-    //                     )),
-    //                     Box::new(LabelExpression::Integer(2)),
-    //                 ),
-    //             ),
-    //         ],
-    //     );
-
-    //     assert_header(
-    //         "Alias: @a (0 | 1) & 2",
-    //         &[
-    //             HeaderItem::Version("v1".to_string()),
-    //             HeaderItem::Alias(
-    //                 AliasName("a".to_string()),
-    //                 Label,
-    //             ),
-    //         ],
-    //     );
-    // }
-    // #[test]
-    // fn multiple_headers() {}
+    #[test]
+    fn alias() {
+        use AbstractLabelExpression::*;
+        let alias = |x| HeaderItem::Alias(AliasName("a".to_string()), x);
+        let v1 = HeaderItem::Version("v1".to_string());
+        assert_header("Alias: @a 0", &[v1.clone(), alias(Integer(0))]);
+        assert_header(
+            "Alias: @a 0 & 1",
+            &[v1.clone(), alias(Conjunction(vec![Integer(0), Integer(1)]))],
+        );
+        // & binds stronger
+        assert_header(
+            "Alias: @a 1 | 2 & 0",
+            &[
+                v1.clone(),
+                alias(Disjunction(vec![
+                    Integer(1),
+                    Conjunction(vec![Integer(2), Integer(0)]),
+                ])),
+            ],
+        );
+        assert_header(
+            "Alias: @a (0 | 1) & 2",
+            &[
+                v1.clone(),
+                alias(Conjunction(vec![
+                    Disjunction(vec![Integer(0), Integer(1)]),
+                    Integer(2),
+                ])),
+            ],
+        );
+        assert_header(
+            "Alias: @a !@b",
+            &[v1, alias(Negated(Box::new(Alias("b".to_string()))))],
+        );
+    }
 }

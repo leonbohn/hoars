@@ -30,7 +30,7 @@ pub use format::{
 };
 
 pub use body::{Body, Edge, State};
-pub use header::{Header, HeaderItem};
+pub use header::{Header, HeaderItem, UnknownValue};
 
 use itertools::Itertools;
 use lexer::Token;
@@ -55,6 +55,56 @@ pub enum FromHoaError {
     ParserError(String),
     /// Abort token was encountered.
     Abort,
+    /// The automaton parsed but violates a rule of the format.
+    Invalid(ValidationError),
+}
+
+/// A violation of the HOA format found by [`HoaRepresentation::validate`].
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum ValidationError {
+    /// There is no `Acceptance:` header item.
+    MissingAcceptance,
+    /// A header item that may appear at most once appears several times.
+    DuplicateHeader(&'static str),
+    /// An acceptance set is not below the count given in `Acceptance:`.
+    AcceptanceSetOutOfRange {
+        /// The offending acceptance set.
+        set: Id,
+        /// The number of acceptance sets.
+        count: Id,
+    },
+    /// A state is not below the count given in `States:`.
+    StateOutOfRange {
+        /// The offending state.
+        state: Id,
+        /// The number of states.
+        count: Id,
+    },
+    /// An atomic proposition is not below the count given in `AP:`.
+    ApOutOfRange {
+        /// The offending atomic proposition.
+        ap: u16,
+        /// The number of atomic propositions (0 if there is no `AP:` item).
+        count: usize,
+    },
+}
+
+impl Display for ValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingAcceptance => write!(f, "missing `Acceptance:` header item"),
+            Self::DuplicateHeader(name) => write!(f, "`{name}:` appears more than once"),
+            Self::AcceptanceSetOutOfRange { set, count } => {
+                write!(f, "acceptance set {set} used but only {count} declared")
+            }
+            Self::StateOutOfRange { state, count } => {
+                write!(f, "state {state} used but only {count} states declared")
+            }
+            Self::ApOutOfRange { ap, count } => {
+                write!(f, "AP {ap} used but only {count} declared")
+            }
+        }
+    }
 }
 
 impl Display for FromHoaError {
@@ -71,6 +121,7 @@ impl Display for FromHoaError {
                 write!(f, "Could not parse acceptance condition: {}", message)
             }
             FromHoaError::Abort => write!(f, "Abort token encountered"),
+            FromHoaError::Invalid(err) => write!(f, "Invalid automaton: {}", err),
             FromHoaError::LexerError(rep) => write!(f, "Lexer error: {}", rep),
             FromHoaError::ParserError(rep) => write!(f, "Parser error: {}", rep),
         }
@@ -123,16 +174,29 @@ impl HoaRepresentation {
         &mut self.body
     }
 
-    fn from_parsed((header, body): (Header, Body)) -> Self {
-        Self::from_parts(header, body)
-    }
-
     /// Parses a HOA automaton from a string.
+    #[allow(clippy::result_large_err)]
     pub fn parser() -> impl Parser<Token, Self, Error = Simple<Token>> {
         Header::parser()
             .then(Body::parser())
             .then_ignore(end())
-            .map(HoaRepresentation::from_parsed)
+            .try_map(|(header, raw_states), span| {
+                let num_aps = header
+                    .iter()
+                    .find_map(|i| match i {
+                        HeaderItem::AP(aps) => Some(aps.len()),
+                        _ => None,
+                    })
+                    .unwrap_or(0);
+                let num_aps = u16::try_from(num_aps)
+                    .map_err(|_| Simple::custom(span.clone(), "too many atomic propositions"))?;
+                let states = raw_states
+                    .into_iter()
+                    .map(|s| s.resolve(num_aps))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| Simple::custom(span, e))?;
+                Ok(HoaRepresentation::from_parts(header, states.into()))
+            })
     }
 
     /// Creates a new HOA automaton from the given version, header and
@@ -169,6 +233,100 @@ impl HoaRepresentation {
         } else {
             Err(errors.join("\n"))
         }
+    }
+
+    /// Checks the automaton against the rules of the format: the version is `v1` or
+    /// `v1.x`, `Acceptance:` appears exactly once and `States:`, `AP:`, `acc-name:`,
+    /// `tool:` and `name:` at most once, and all states, acceptance sets and atomic
+    /// propositions that are used lie within the declared counts. This is run by the
+    /// parser; use [`HoaRepresentation::verify`] for the checks on the body's states.
+    pub fn validate(&self) -> Result<(), FromHoaError> {
+        use ValidationError::*;
+        let invalid = |e| Err(FromHoaError::Invalid(e));
+
+        let version = self.version();
+        let minor = version.strip_prefix("v1.");
+        if version != "v1" && !minor.is_some_and(|m| m.split('.').all(|d| !d.is_empty())) {
+            return Err(FromHoaError::UnsupportedVersion(version));
+        }
+
+        let count = |pred: fn(&HeaderItem) -> bool| self.header.iter().filter(|i| pred(i)).count();
+        for (name, n) in [
+            ("States", count(|i| matches!(i, HeaderItem::States(_)))),
+            ("AP", count(|i| matches!(i, HeaderItem::AP(_)))),
+            (
+                "acc-name",
+                count(|i| matches!(i, HeaderItem::AcceptanceName(..))),
+            ),
+            ("tool", count(|i| matches!(i, HeaderItem::Tool(..)))),
+            ("name", count(|i| matches!(i, HeaderItem::Name(_)))),
+            (
+                "Acceptance",
+                count(|i| matches!(i, HeaderItem::Acceptance(..))),
+            ),
+        ] {
+            if n > 1 {
+                return invalid(DuplicateHeader(name));
+            }
+        }
+        let Some((num_sets, condition)) = self.header.iter().find_map(|i| match i {
+            HeaderItem::Acceptance(n, c) => Some((*n, c)),
+            _ => None,
+        }) else {
+            return invalid(MissingAcceptance);
+        };
+        let num_aps = self.aps().len();
+        let num_states = self.header.iter().find_map(|i| match i {
+            HeaderItem::States(n) => Some(*n),
+            _ => None,
+        });
+
+        let check_set = |set: Id| match set < num_sets {
+            true => Ok(()),
+            false => invalid(AcceptanceSetOutOfRange {
+                set,
+                count: num_sets,
+            }),
+        };
+        let check_state = |state: Id| match num_states {
+            Some(count) if state >= count => invalid(StateOutOfRange { state, count }),
+            _ => Ok(()),
+        };
+        let check_label = |label: &AbstractLabelExpression| match label
+            .max_ap()
+            .filter(|ap| usize::from(*ap) >= num_aps)
+        {
+            Some(ap) => invalid(ApOutOfRange { ap, count: num_aps }),
+            None => Ok(()),
+        };
+
+        condition.sets().into_iter().try_for_each(check_set)?;
+        for item in self.header.iter() {
+            match item {
+                HeaderItem::Start(conj) => conj.0.iter().copied().try_for_each(check_state)?,
+                HeaderItem::Alias(_, expr) => check_label(expr)?,
+                _ => {}
+            }
+        }
+        for state in self.body.iter() {
+            check_state(state.id())?;
+            for edge in state.edges() {
+                edge.state_conjunction()
+                    .0
+                    .iter()
+                    .copied()
+                    .try_for_each(check_state)?;
+                edge.acceptance_signature()
+                    .0
+                    .iter()
+                    .copied()
+                    .try_for_each(check_set)?;
+                if let LabelExpression::Abstract(expr) = &edge.label().0 {
+                    check_label(expr)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Returns the number of states in the automaton, if the header states it.
@@ -234,6 +392,43 @@ impl HoaRepresentation {
             .collect()
     }
 
+    /// Replaces all alias references (`@name`) in the aliases and in the edge labels by
+    /// their definitions. The `Alias:` header items are kept. Fails on undefined or
+    /// cyclic aliases; on error the automaton is left unchanged.
+    ///
+    /// Parsing does not unalias, so call this before converting labels to BDDs.
+    pub fn unalias(&mut self) -> Result<(), String> {
+        let raw: std::collections::HashMap<_, _> = self
+            .aliases()
+            .into_iter()
+            .map(|(name, expr)| (name.0, expr))
+            .collect();
+        let defs = raw
+            .iter()
+            .map(|(name, expr)| {
+                Ok((
+                    name.clone(),
+                    expr.substitute(&raw, &mut vec![name.clone()])?,
+                ))
+            })
+            .collect::<Result<std::collections::HashMap<_, _>, String>>()?;
+        let mut body = self.body.clone();
+        for edge in body.iter_mut().flat_map(|s| s.edges_mut()) {
+            if let LabelExpression::Abstract(expr) = &edge.label().0 {
+                edge.0 = Label(LabelExpression::Abstract(
+                    expr.substitute(&defs, &mut vec![])?,
+                ));
+            }
+        }
+        for item in self.header.iter_mut() {
+            if let HeaderItem::Alias(name, expr) = item {
+                *expr = defs[&name.0].clone();
+            }
+        }
+        self.body = body;
+        Ok(())
+    }
+
     /// Returns the acceptance name of the automaton, if the header has one.
     pub fn acceptance_name(&self) -> Option<(&AcceptanceName, &Vec<AcceptanceInfo>)> {
         self.header().iter().find_map(|item| match item {
@@ -273,6 +468,7 @@ impl std::fmt::Display for AbstractLabelExpression {
                 false => write!(f, "f"),
             },
             AbstractLabelExpression::Integer(i) => write!(f, "{i}"),
+            AbstractLabelExpression::Alias(name) => write!(f, "@{name}"),
             AbstractLabelExpression::Negated(expr) => {
                 if is_atom(expr) {
                     write!(f, "!{}", expr)
@@ -310,7 +506,9 @@ impl std::fmt::Display for AbstractLabelExpression {
 fn is_atom(expr: &AbstractLabelExpression) -> bool {
     matches!(
         expr,
-        AbstractLabelExpression::Boolean(_) | AbstractLabelExpression::Integer(_)
+        AbstractLabelExpression::Boolean(_)
+            | AbstractLabelExpression::Integer(_)
+            | AbstractLabelExpression::Alias(_)
     )
 }
 
@@ -398,34 +596,68 @@ fn print_error_report<I: Iterator<Item = Simple<String>>>(input: &str, errs: I) 
     tracing::error!("{}", build_error_report(input, errs))
 }
 
+/// Splits a token stream into automata: each returned chunk ends with a `--END--`, a
+/// trailing chunk without `--END--` is returned last. An `--ABORT--` discards everything
+/// since the previous boundary.
+fn split_automata(tokens: Vec<(Token, lexer::Span)>) -> Vec<Vec<(Token, lexer::Span)>> {
+    let mut chunks = Vec::new();
+    let mut current = Vec::new();
+    for (token, span) in tokens {
+        match token {
+            Token::Abort => current.clear(),
+            Token::BodyEnd => {
+                current.push((token, span));
+                chunks.push(std::mem::take(&mut current));
+            }
+            _ => current.push((token, span)),
+        }
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    chunks
+}
+
 /// Returns the byte index just past the `--END--` that terminates the first
 /// automaton in `input` that was not aborted.
 ///
 /// An `--ABORT--` discards the automaton it terminates, so aborted automata
 /// never contribute a position; the search continues after the abort. Returns
-/// `None` if no `--END--` follows the last abort.
+/// `None` if no `--END--` follows the last abort, or if `input` cannot be lexed.
+/// Only real tokens count, so `--END--` or `--ABORT--` inside a string or a comment
+/// is ignored.
 pub fn first_automaton_split_position(input: &str) -> Option<usize> {
-    const ENDLEN: usize = "--END--".len();
-    const ABORTLEN: usize = "--ABORT--".len();
-
-    let mut cursor = 0;
-    loop {
-        let rest = &input[cursor..];
-        let end = cursor + rest.find("--END--")?;
-        match rest.find("--ABORT--") {
-            Some(abort) if cursor + abort < end => cursor += abort + ABORTLEN,
-            _ => return Some(end + ENDLEN),
-        }
-    }
+    let end = split_automata(input::lex(input).ok()?)
+        .into_iter()
+        .find(|chunk| matches!(chunk.last(), Some((Token::BodyEnd, _))))?
+        .pop()?
+        .1
+        .end;
+    // spans count characters, the result is a byte index
+    Some(
+        input
+            .char_indices()
+            .nth(end)
+            .map_or(input.len(), |(i, _)| i),
+    )
 }
 
+/// Parses all automata in `input`. Automata that are aborted or that fail to parse are
+/// skipped (failures are logged). If `input` cannot be lexed, nothing is returned.
 pub fn parse_hoa_automata(input: &str) -> Vec<HoaRepresentation> {
+    let tokens = match input::lex(input) {
+        Ok(tokens) => tokens,
+        Err(e) => {
+            warn!("Error when lexing automata: {}", e);
+            return Vec::new();
+        }
+    };
     let mut out = Vec::new();
-    for hoa_aut in input.split_inclusive("--END--") {
-        if !hoa_aut.contains("--BODY--") {
+    for chunk in split_automata(tokens) {
+        if !chunk.iter().any(|(t, _)| *t == Token::BodyStart) {
             continue;
         }
-        match hoa_aut.try_into() {
+        match input::parse_tokens(input, chunk) {
             Ok(aut) => out.push(aut),
             Err(e) => warn!("Error when parsing automaton: {}", e),
         }
@@ -444,6 +676,269 @@ mod tests {
         header::Header,
         label::AnonymousAbstract,
     };
+
+    const ALIASED: &str = "HOA: v1
+States: 1
+Start: 0
+AP: 2 \"a\" \"b\"
+Alias: @x 0 & 1
+Alias: @y !@x | 0
+Acceptance: 1 Inf(0)
+--BODY--
+State: 0
+[@y] 0 {0}
+[@x & !0] 0
+--END--";
+
+    #[test]
+    fn aliases_in_edges_and_aliases_unalias_convert_and_round_trip() {
+        let mut aut = HoaRepresentation::try_from(ALIASED).unwrap();
+        let printed = crate::output::to_hoa(&aut);
+        assert_eq!(HoaRepresentation::try_from(printed.as_str()).unwrap(), aut);
+        assert!(printed.contains("[@y] 0"), "{printed}");
+
+        let before = aut.clone();
+        aut.unalias().unwrap();
+        let printed = crate::output::to_hoa(&aut);
+        assert!(printed.contains("Alias: @y !(0 & 1) | 0"), "{printed}");
+        assert!(printed.contains("[!(0 & 1) | 0] 0 {0}"), "{printed}");
+        // printing flattens nested conjunctions, so compare the labels as BDDs
+        let reparsed = HoaRepresentation::try_from(printed.as_str()).unwrap();
+        let vs = biodivine_lib_bdd::BddVariableSet::new_anonymous(2);
+        let bdds = |a: &HoaRepresentation| {
+            a.body()[0]
+                .edges()
+                .iter()
+                .map(|e| {
+                    let crate::LabelExpression::Abstract(l) = &e.label().0 else {
+                        panic!()
+                    };
+                    l.try_into_bdd(&vs).unwrap()
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(bdds(&aut), bdds(&reparsed));
+        // unresolved aliases do not convert
+        let crate::LabelExpression::Abstract(l) = &before.body()[0].edges()[0].label().0 else {
+            panic!()
+        };
+        assert!(l.try_into_bdd(&vs).is_err());
+    }
+
+    #[test]
+    fn unalias_rejects_undefined_and_cyclic_aliases() {
+        let undefined = ALIASED.replace("[@x & !0]", "[@z]");
+        let mut aut = HoaRepresentation::try_from(undefined.as_str()).unwrap();
+        let before = aut.clone();
+        assert!(aut.unalias().unwrap_err().contains("@z is not defined"));
+        assert_eq!(aut, before);
+
+        let cyclic = ALIASED.replace("Alias: @x 0 & 1", "Alias: @x @y");
+        let mut aut = HoaRepresentation::try_from(cyclic.as_str()).unwrap();
+        assert!(aut.unalias().unwrap_err().contains("itself"));
+    }
+
+    fn with_body(body: &str) -> String {
+        format!(
+            "HOA: v1\nStates: 2\nStart: 0\nAP: 2 \"a\" \"b\"\nAcceptance: 1 Inf(0)\n--BODY--\n{body}\n--END--"
+        )
+    }
+
+    #[test]
+    fn implicit_labels_equal_explicit_labels() {
+        let implicit = with_body("State: 0\n1 {0}\n0\n1\n1\nState: 1\n0\n0\n0\n0");
+        let explicit = with_body(
+            "State: 0\n[!0 & !1] 1 {0}\n[0 & !1] 0\n[!0 & 1] 1\n[0 & 1] 1\n\
+             State: 1\n[!0 & !1] 0\n[0 & !1] 0\n[!0 & 1] 0\n[0 & 1] 0",
+        );
+        assert_eq!(
+            HoaRepresentation::try_from(implicit.as_str()).unwrap(),
+            HoaRepresentation::try_from(explicit.as_str()).unwrap()
+        );
+    }
+
+    #[test]
+    fn state_labels_equal_transition_labels() {
+        let state_labels = with_body("State: [0] 0\n0 {0}\n1\nState: [!0 & 1] 1\n0");
+        let explicit = with_body("State: 0\n[0] 0 {0}\n[0] 1\nState: 1\n[!0 & 1] 0");
+        assert_eq!(
+            HoaRepresentation::try_from(state_labels.as_str()).unwrap(),
+            HoaRepresentation::try_from(explicit.as_str()).unwrap()
+        );
+    }
+
+    #[test]
+    fn invalid_label_combinations_are_errors() {
+        for (body, msg) in [
+            ("State: 0\n[0] 0\n1", "mixes labelled and unlabelled"),
+            ("State: [0] 0\n[1] 0", "must not have labels"),
+            ("State: 0\n0\n1\n0", "exactly 2^2 edges"),
+        ] {
+            let err = HoaRepresentation::try_from(with_body(body).as_str())
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(msg), "{body}: {err}");
+        }
+    }
+
+    const MINIMAL: &str = "HOA: v1\nAcceptance: 0 t\n--BODY--\n--END--";
+
+    #[test]
+    fn escaped_quote_in_string() {
+        let hoa = MINIMAL.replace("v1", "v1\nname: \"a\\\"b\\\\c\\n\"");
+        let aut = HoaRepresentation::try_from(hoa.as_str()).unwrap();
+        assert!(
+            aut.header()
+                .iter()
+                .any(|i| *i == HeaderItem::Name("a\"b\\c\\n".into()))
+        );
+        // the writer escapes again, so it round-trips
+        let printed = crate::output::to_hoa(&aut);
+        assert_eq!(HoaRepresentation::try_from(printed.as_str()).unwrap(), aut);
+    }
+
+    #[test]
+    fn nested_comment() {
+        let hoa = MINIMAL.replace("v1", "v1 /*a/*b*/c*/ /* d */");
+        assert!(HoaRepresentation::try_from(hoa.as_str()).is_ok());
+        let unterminated = MINIMAL.replace("v1", "v1 /*a/*b*/c");
+        assert!(HoaRepresentation::try_from(unterminated.as_str()).is_err());
+    }
+
+    #[test]
+    fn abort_inside_string_is_not_an_abort() {
+        let hoa = MINIMAL.replace("v1", "v1\nname: \"--ABORT-- --END--\"");
+        assert!(HoaRepresentation::try_from(hoa.as_str()).is_ok());
+        assert_eq!(super::parse_hoa_automata(&hoa).len(), 1);
+        assert_eq!(super::first_automaton_split_position(&hoa), Some(hoa.len()));
+    }
+
+    #[test]
+    fn abort_in_header_followed_by_valid_automaton() {
+        let input = format!("HOA: v1\nStates: 3\n--ABORT--\n{MINIMAL}");
+        let auts = super::parse_hoa_automata(&input);
+        assert_eq!(auts.len(), 1);
+        assert_eq!(auts[0], HoaRepresentation::try_from(MINIMAL).unwrap());
+        assert!(matches!(
+            HoaRepresentation::try_from(input.as_str()),
+            Err(super::FromHoaError::Abort)
+        ));
+    }
+
+    #[test]
+    fn abort_suffix_is_an_identifier() {
+        let hoa = MINIMAL.replace("v1", "v1\nfoo--ABORT--: 1\nacc-name: foo--ABORT--");
+        let aut = HoaRepresentation::try_from(hoa.as_str()).unwrap();
+        assert!(
+            aut.header()
+                .iter()
+                .any(|i| matches!(i, HeaderItem::Unknown(n, _) if n == "foo--ABORT--"))
+        );
+        assert_eq!(super::parse_hoa_automata(&hoa).len(), 1);
+    }
+
+    fn validation_error(hoa: &str) -> crate::FromHoaError {
+        HoaRepresentation::try_from(hoa).unwrap_err()
+    }
+
+    fn invalid(e: crate::ValidationError) -> crate::FromHoaError {
+        crate::FromHoaError::Invalid(e)
+    }
+
+    const VALID: &str = "HOA: v1\nStates: 2\nStart: 0\nAP: 1 \"a\"\nAcceptance: 2 Inf(0) | Fin(1)\n\
+         --BODY--\nState: 0\n[0] 1 {1}\nState: 1\n[!0] 0 {0}\n--END--";
+
+    #[test]
+    fn validation_accepts_valid_automaton_and_minor_versions() {
+        assert!(HoaRepresentation::try_from(VALID).is_ok());
+        for v in ["v1.1", "v1.10.2"] {
+            let hoa = VALID.replace("v1", v);
+            assert!(HoaRepresentation::try_from(hoa.as_str()).is_ok(), "{v}");
+        }
+    }
+
+    #[test]
+    fn unsupported_versions() {
+        for v in ["v2", "v1.", "v10", "v2.1", "v1x"] {
+            let hoa = VALID.replace("HOA: v1", &format!("HOA: {v}"));
+            assert_eq!(
+                validation_error(&hoa),
+                crate::FromHoaError::UnsupportedVersion(v.into()),
+                "{v}"
+            );
+        }
+    }
+
+    #[test]
+    fn missing_acceptance() {
+        let hoa = VALID.replace("Acceptance: 2 Inf(0) | Fin(1)\n", "");
+        assert_eq!(
+            validation_error(&hoa),
+            invalid(crate::ValidationError::MissingAcceptance)
+        );
+    }
+
+    #[test]
+    fn duplicate_headers() {
+        for (name, extra) in [
+            ("States", "States: 2"),
+            ("AP", "AP: 0"),
+            ("acc-name", "acc-name: all\nacc-name: all"),
+            ("tool", "tool: \"a\"\ntool: \"b\""),
+            ("name", "name: \"a\"\nname: \"b\""),
+            ("Acceptance", "Acceptance: 0 t"),
+        ] {
+            let hoa = VALID.replace("--BODY--", &format!("{extra}\n--BODY--"));
+            assert_eq!(
+                validation_error(&hoa),
+                invalid(crate::ValidationError::DuplicateHeader(name)),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn acceptance_set_out_of_range() {
+        for hoa in [
+            VALID.replace("Fin(1)", "Fin(2)"),
+            VALID.replace("{1}", "{2}"),
+        ] {
+            assert_eq!(
+                validation_error(&hoa),
+                invalid(crate::ValidationError::AcceptanceSetOutOfRange { set: 2, count: 2 })
+            );
+        }
+    }
+
+    #[test]
+    fn state_out_of_range() {
+        for (hoa, state) in [
+            (VALID.replace("Start: 0", "Start: 2"), 2),
+            (VALID.replace("[0] 1", "[0] 3"), 3),
+            (VALID.replace("State: 1", "State: 4"), 4),
+        ] {
+            assert_eq!(
+                validation_error(&hoa),
+                invalid(crate::ValidationError::StateOutOfRange { state, count: 2 })
+            );
+        }
+        // without `States:` any state id is fine
+        let hoa = VALID.replace("States: 2\n", "").replace("[0] 1", "[0] 3");
+        assert!(HoaRepresentation::try_from(hoa.as_str()).is_ok());
+    }
+
+    #[test]
+    fn ap_out_of_range() {
+        for hoa in [
+            VALID.replace("[!0]", "[!1]"),
+            VALID.replace("AP: 1 \"a\"\n", "AP: 1 \"a\"\nAlias: @x 1\n"),
+        ] {
+            assert_eq!(
+                validation_error(&hoa),
+                invalid(crate::ValidationError::ApOutOfRange { ap: 1, count: 1 })
+            );
+        }
+    }
 
     #[test]
     fn integer_overflow_is_a_parse_error() {

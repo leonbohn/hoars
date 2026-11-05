@@ -3,27 +3,27 @@ use std::ops::{Deref, DerefMut};
 use chumsky::prelude::*;
 
 use crate::{
-    AcceptanceSignature, AtomicProposition, Id, Label, LabelExpression, StateConjunction,
-    lexer::Token, value,
+    AbstractLabelExpression, AcceptanceSignature, AtomicProposition, Id, Label, LabelExpression,
+    StateConjunction, lexer::Token, value,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[allow(unused)]
 pub struct Alphabet(pub Vec<AtomicProposition>);
 
+/// A state as parsed, before implicit labels and state labels are resolved.
 #[derive(Clone, Debug)]
-pub struct RawState(
-    Option<Label>,
-    Id,
-    Option<String>,
-    Option<AcceptanceSignature>,
-);
+pub(crate) struct RawState {
+    label: Option<Label>,
+    id: Id,
+    comment: Option<String>,
+    acc: Option<AcceptanceSignature>,
+    edges: Vec<RawEdge>,
+}
 
+/// An edge as parsed; the label is missing for implicit-label edges and state-label states.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ExplicitEdge(Label, StateConjunction, Option<AcceptanceSignature>);
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ImplicitEdge(StateConjunction, Option<AcceptanceSignature>);
+struct RawEdge(Option<Label>, StateConjunction, Option<AcceptanceSignature>);
 
 /// Represents an edge in a HOA automaton. It contains the [`crate::LabelExpression`], the
 /// [`StateConjunction`] and the [`AcceptanceSignature`] of the edge.
@@ -107,37 +107,80 @@ impl State {
     }
 }
 
-impl From<(Option<AcceptanceSignature>, ExplicitEdge)> for Edge {
-    fn from((state_acc, edge): (Option<AcceptanceSignature>, ExplicitEdge)) -> Self {
-        let acc = match (state_acc, &edge.2) {
-            (None, None) => AcceptanceSignature(Vec::new()),
-            (Some(acc), None) => acc,
-            (None, Some(acc)) => acc.clone(),
-            (Some(left), Some(right)) => {
-                AcceptanceSignature(left.iter().cloned().chain(right.iter().cloned()).collect())
-            }
-        };
-        Edge(edge.0, edge.1, acc)
+impl RawState {
+    /// Resolves implicit labels and the state label into explicit edge labels.
+    /// `num_aps` is the number of atomic propositions declared in the header.
+    ///
+    /// - A labelled state must have unlabelled edges, each of which gets the state label.
+    /// - An unlabelled state with unlabelled edges must have exactly `2^num_aps` edges;
+    ///   edge `i` gets the label in which AP `j` is true iff bit `j` of `i` is set.
+    /// - Mixing labelled and unlabelled edges is an error.
+    pub(crate) fn resolve(self, num_aps: u16) -> Result<State, String> {
+        let RawState {
+            label: state_label,
+            id,
+            comment,
+            acc: state_acc,
+            edges,
+        } = self;
+        let labelled = edges.iter().filter(|e| e.0.is_some()).count();
+        if state_label.is_some() && labelled > 0 {
+            return Err(format!(
+                "State {id} has a state label, so its edges must not have labels"
+            ));
+        }
+        if labelled > 0 && labelled < edges.len() {
+            return Err(format!("State {id} mixes labelled and unlabelled edges"));
+        }
+        let implicit = state_label.is_none() && labelled == 0 && !edges.is_empty();
+        if implicit && (num_aps >= 32 || edges.len() != 1usize << num_aps) {
+            return Err(format!(
+                "State {id} has implicit edge labels, so it needs exactly 2^{num_aps} edges but has {}",
+                edges.len()
+            ));
+        }
+
+        let out_edges = edges
+            .into_iter()
+            .enumerate()
+            .map(|(i, RawEdge(label, conj, acc))| {
+                let label = match (label, &state_label) {
+                    (Some(l), _) => l,
+                    (None, Some(l)) => l.clone(),
+                    (None, None) => implicit_label(i, num_aps),
+                };
+                let acc = match (&state_acc, acc) {
+                    (None, None) => AcceptanceSignature(Vec::new()),
+                    (Some(acc), None) => acc.clone(),
+                    (None, Some(acc)) => acc,
+                    (Some(left), Some(right)) => AcceptanceSignature(
+                        left.iter().cloned().chain(right.iter().cloned()).collect(),
+                    ),
+                };
+                Edge(label, conj, acc)
+            })
+            .collect();
+        Ok(State(id, comment, out_edges))
     }
 }
 
-impl TryFrom<(RawState, Vec<ExplicitEdge>)> for State {
-    type Error = String;
-
-    fn try_from((state, edges): (RawState, Vec<ExplicitEdge>)) -> Result<Self, Self::Error> {
-        let mut out_edges = vec![];
-        let RawState(state_label, id, state_text, state_acc) = state;
-
-        if state_label.is_some() {
-            return Err("Transformation from state-based to transition-based requires adding a new initial state etc (see example 'non-deterministic state-based Büchi Automaton')".to_string());
-        }
-
-        for raw_edge in edges {
-            out_edges.push(Edge::from((state_acc.clone(), raw_edge)));
-        }
-
-        Ok(State(id, state_text, out_edges))
-    }
+/// The label of the `i`-th implicit edge: AP `j` is positive iff bit `j` of `i` is set.
+fn implicit_label(i: usize, num_aps: u16) -> Label {
+    let mut literals: Vec<_> = (0..num_aps)
+        .map(|j| {
+            let ap = AbstractLabelExpression::Integer(j);
+            if i >> j & 1 == 1 {
+                ap
+            } else {
+                AbstractLabelExpression::Negated(Box::new(ap))
+            }
+        })
+        .collect();
+    Label(LabelExpression::Abstract(match literals.len() {
+        0 => AbstractLabelExpression::Boolean(true),
+        1 => literals.remove(0),
+        _ => AbstractLabelExpression::Conjunction(literals),
+    }))
 }
 
 pub fn label() -> impl Parser<Token, Label, Error = Simple<Token>> {
@@ -148,37 +191,33 @@ pub fn label() -> impl Parser<Token, Label, Error = Simple<Token>> {
         .map(Label)
 }
 
-fn explicit_edge() -> impl Parser<Token, ExplicitEdge, Error = Simple<Token>> {
+fn edge() -> impl Parser<Token, RawEdge, Error = Simple<Token>> {
     label()
+        .or_not()
         .then(value::state_conjunction())
         .then(value::acceptance_signature().or_not())
         .map(|((label, state_conjunction), acceptance_signature)| {
-            ExplicitEdge(label, state_conjunction, acceptance_signature)
+            RawEdge(label, state_conjunction, acceptance_signature)
         })
 }
 
-// For now, we allow only explicit edges, but this might change in the future. In any case, we already have the necessary
-// infrastructure to support implicit edges.
-#[allow(unused)]
-fn implicit_edge() -> impl Parser<Token, ImplicitEdge, Error = Simple<Token>> {
-    value::state_conjunction()
-        .then(value::acceptance_signature().or_not())
-        .map(|(label, acceptance_signature)| ImplicitEdge(label, acceptance_signature))
-}
-
-#[allow(clippy::result_large_err)]
-pub fn state() -> impl Parser<Token, State, Error = Simple<Token>> {
+pub(crate) fn state() -> impl Parser<Token, RawState, Error = Simple<Token>> {
     just(Token::Header("State".to_string()))
         .ignore_then(
             label()
                 .or_not()
                 .then(value::integer())
                 .then(value::text().or_not())
-                .then(value::acceptance_signature().or_not())
-                .map(|(((l, i), t), a)| RawState(l, i, t, a)),
+                .then(value::acceptance_signature().or_not()),
         )
-        .then(explicit_edge().repeated())
-        .try_map(|input, span| State::try_from(input).map_err(|err| Simple::custom(span, err)))
+        .then(edge().repeated())
+        .map(|((((label, id), comment), acc), edges)| RawState {
+            label,
+            id,
+            comment,
+            acc,
+            edges,
+        })
 }
 
 /// Represents the body of a HOA automaton. In essence, this is just a vector of [`State`]s.
@@ -201,10 +240,9 @@ impl Body {
         Self(Vec::new())
     }
 
-    pub(crate) fn parser() -> impl Parser<Token, Self, Error = Simple<Token>> {
+    pub(crate) fn parser() -> impl Parser<Token, Vec<RawState>, Error = Simple<Token>> {
         just(Token::BodyStart)
             .ignore_then(state().repeated())
-            .map(Body)
             .then_ignore(just(Token::BodyEnd))
     }
 }
@@ -267,7 +305,10 @@ mod tests {
                     error_list.into_iter().map(|err| err.map(|c| c.to_string())),
                 )
             })?;
-        Ok(ast.0)
+        // the tests only use explicit labels, so the AP count does not matter
+        ast.into_iter()
+            .map(|s| s.resolve(0).map_err(|_| ()))
+            .collect()
     }
 
     #[test]
