@@ -5,6 +5,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- `AbstractLabelExpression::try_into_bdd` now takes a pre-built `&BddVariableSet` (and `&self`), so a whole automaton can be converted with one variable set; `try_into_prop` likewise takes `&self`. AP `i` maps to `BddVariable::from_index(i)`, so the `vars` slice is no longer needed.
+- Removed the unused `build_vars` helper.
+
 ### Fixed
 
+- Label expressions are converted to BDDs by a recursive fold, so nested conjunctions and disjunctions (e.g. `[0&!1 | !0&1]` or `[(0|1) & !1]`) are no longer rejected.
+- `[0 & !0]` now converts to `false` instead of an incorrect BDD.
+- An out-of-bounds AP identifier in a nested expression (e.g. `[0 & !7]` with 2 APs) returns an error instead of panicking.
 - `first_automaton_split_position` no longer loops forever when an `--ABORT--` occurs before the first `--END--`; aborted automata are skipped and the returned index refers to the end of the first non-aborted automaton in the original input.

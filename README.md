@@ -8,6 +8,10 @@ The format itself is thorougly described on [this website](https://adl.github.io
 Obtaining an overview of ω-automata helps before diving into the format itself, see for example [this one](https://spot.lre.epita.fr/concepts.html) given by the makers of [spot](https://spot.lre.epita.fr/).
 
 #### Changelog (most likely incomplete)
+**Unreleased**
+
+Breaking: `AbstractLabelExpression::try_into_bdd` now takes only a `&BddVariableSet` (the AP `i` is variable `BddVariable::from_index(i)`), and takes `&self`; `try_into_prop` also takes `&self`. The unused `build_vars` helper was removed. Labels with nested conjunctions/disjunctions are now converted correctly instead of being rejected, and out-of-bounds APs return an error instead of panicking.
+
 **0.3.0**
 
 Breaking: updated `biodivine-lib-bdd` to 0.6 (its `Bdd` type is part of the public API via `HoaExpression`). Also updated `itertools` to 0.15, moved to the 2024 edition, and the code now lives in its own repository again.

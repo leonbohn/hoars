@@ -11,7 +11,7 @@ mod value;
 pub mod label;
 pub use label::{
     AbstractLabelExpression, HoaAlphabet, HoaExpression, HoaRepr, HoaSymbol, Label,
-    LabelExpression, MAX_APS, build_vars,
+    LabelExpression, MAX_APS,
 };
 
 use tracing::warn;
