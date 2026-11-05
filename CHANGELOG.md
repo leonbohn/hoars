@@ -7,11 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- `AbstractLabelExpression::try_into_bdd` now takes a pre-built `&BddVariableSet` (and `&self`), so a whole automaton can be converted with one variable set; `try_into_prop` likewise takes `&self`. AP `i` maps to `BddVariable::from_index(i)`, so the `vars` slice is no longer needed.
+- Accessors no longer `debug_assert` header multiplicities that the HOA spec does not require, so they work on valid files without `States:`, `Start:`, `acc-name:` or `AP:`:
+  - `HoaRepresentation::aps` returns `&[String]` (was `&Vec<String>`) and is empty when the header has no `AP:`;
+  - `num_aps` returns `u16` (was `u8`, which panicked above 255 APs);
+  - `acceptance` returns `Option<HoaAcceptance>`;
+  - `Header::acceptance_name` returns `Option<AcceptanceName>`;
+  - `num_states`, `start` and `HoaRepresentation::acceptance_name` keep their types but no longer assert.
+- `AbstractLabelExpression::try_into_bdd` now takes a pre-built `&BddVariableSet` (and `&self`), so a whole automaton can be converted with one variable set; `try_into_prop` likewise takes `&self`, and both it and `try_into_hoa_expression` take the AP count as `u16`. AP `i` maps to `BddVariable::from_index(i)`, so the `vars` slice is no longer needed.
 - Removed the unused `build_vars` helper.
 
 ### Fixed
 
+- Integers that do not fit the target type (e.g. `States: 99999999999`) are reported as parse errors instead of panicking, and an AP identifier that does not fit a `u16` is no longer silently truncated.
 - The writer (`output::to_hoa`) now produces HOA that parses back to the same automaton:
   - labels print as `[<expr>]` with precedence-aware parentheses (a disjunction inside a conjunction, a non-atom inside a negation), instead of the Rust `Debug` representation;
   - `LabelExpression::Expression(Bdd)` is printed as a DNF built from the BDD's satisfying clauses;

@@ -10,7 +10,7 @@ Obtaining an overview of ω-automata helps before diving into the format itself,
 #### Changelog (most likely incomplete)
 **Unreleased**
 
-Breaking: `AbstractLabelExpression::try_into_bdd` now takes only a `&BddVariableSet` (the AP `i` is variable `BddVariable::from_index(i)`), and takes `&self`; `try_into_prop` also takes `&self`. The unused `build_vars` helper was removed. Labels with nested conjunctions/disjunctions are now converted correctly instead of being rejected, and out-of-bounds APs return an error instead of panicking.
+Breaking: `HoaRepresentation::aps` returns `&[String]`, `num_aps` returns `u16`, `acceptance` returns `Option<HoaAcceptance>`, and `Header::acceptance_name` returns `Option<AcceptanceName>`; accessors no longer panic on missing optional header items. `AbstractLabelExpression::try_into_bdd` now takes only a `&BddVariableSet` (the AP `i` is variable `BddVariable::from_index(i)`), and takes `&self`; `try_into_prop`/`try_into_hoa_expression` take the AP count as `u16`. The unused `build_vars` helper was removed. Overflowing integers are now parse errors instead of panics, and labels with nested conjunctions/disjunctions are converted correctly.
 
 **0.3.0**
 

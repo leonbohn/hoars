@@ -51,8 +51,8 @@ impl AbstractLabelExpression {
     }
 
     /// Converts this expression into a [`Bdd`] over `num_aps` anonymous variables.
-    pub fn try_into_prop(&self, num_aps: u8) -> Result<HoaExpression, String> {
-        let var_set = BddVariableSet::new_anonymous(num_aps as u16);
+    pub fn try_into_prop(&self, num_aps: u16) -> Result<HoaExpression, String> {
+        let var_set = BddVariableSet::new_anonymous(num_aps);
         self.try_into_bdd(&var_set)
     }
 }
@@ -82,7 +82,7 @@ pub enum LabelExpression {
 }
 
 impl LabelExpression {
-    pub fn try_into_hoa_expression(self, num_aps: u8) -> Result<HoaExpression, String> {
+    pub fn try_into_hoa_expression(self, num_aps: u16) -> Result<HoaExpression, String> {
         match self {
             LabelExpression::Expression(b) => Ok(b),
             LabelExpression::Abstract(b) => b.try_into_prop(num_aps),
@@ -166,7 +166,7 @@ impl Anonymous<true> {
 mod tests {
     use super::*;
 
-    fn card(expr: &AbstractLabelExpression, num_aps: u8) -> f64 {
+    fn card(expr: &AbstractLabelExpression, num_aps: u16) -> f64 {
         expr.try_into_prop(num_aps)
             .expect("label should convert")
             .cardinality()

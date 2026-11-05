@@ -191,12 +191,10 @@ impl Header {
         self.iter().find_map(|i| i.count_states())
     }
 
-    pub fn acceptance_name(&self) -> AcceptanceName {
+    pub fn acceptance_name(&self) -> Option<AcceptanceName> {
         self.iter()
             .find_map(|i| i.try_acceptance_name())
-            .expect("Acceptance header must be present")
-            .0
-            .clone()
+            .map(|(name, _)| name.clone())
     }
 }
 

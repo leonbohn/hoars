@@ -171,32 +171,16 @@ impl HoaRepresentation {
         }
     }
 
-    /// Returns the number of states in the automaton.
+    /// Returns the number of states in the automaton, if the header states it.
     pub fn num_states(&self) -> Option<usize> {
-        debug_assert!(
-            self.header()
-                .iter()
-                .filter(|item| matches!(item, HeaderItem::States(_)))
-                .count()
-                == 1,
-            "The number of states must be set exactly once!"
-        );
         self.header().iter().find_map(|item| match item {
             HeaderItem::States(id) => Some(*id as usize),
             _ => None,
         })
     }
 
-    /// Returns the start state conjunction.
+    /// Returns the start state conjunctions of the automaton, which may be empty.
     pub fn start(&self) -> Vec<&StateConjunction> {
-        debug_assert!(
-            self.header()
-                .iter()
-                .filter(|item| matches!(item, HeaderItem::Start(_)))
-                .count()
-                >= 1,
-            "At least one initial state conjunction has to be present!"
-        );
         self.header()
             .iter()
             .filter_map(|item| match item {
@@ -206,47 +190,37 @@ impl HoaRepresentation {
             .collect()
     }
 
-    /// Returns the set of all atomic propositions in the automaton.
-    pub fn aps(&self) -> &Vec<String> {
-        let aps = self
-            .header()
-            .iter()
-            .filter_map(|item| match item {
-                HeaderItem::AP(ap) => Some(ap),
-                _ => None,
-            })
-            .collect_vec();
-        debug_assert!(aps.len() == 1, "There must be exactly one AP header!");
-        aps.first().unwrap()
-    }
-
-    /// Counts the number of atomic propositions in the automaton.
-    pub fn num_aps(&self) -> u8 {
-        self.aps()
-            .len()
-            .try_into()
-            .expect("Could not fit number of aps in u8!")
-    }
-
-    /// Returns the acceptance condition of the automaton.
-    pub fn acceptance(&self) -> HoaAcceptance {
-        debug_assert!(
-            self.header()
-                .iter()
-                .filter(|item| matches!(item, HeaderItem::Acceptance(..)))
-                .count()
-                == 1,
-            "There must be exactly one Acceptance header!"
-        );
+    /// Returns the set of all atomic propositions in the automaton, which is empty
+    /// when the header has no `AP:` item.
+    pub fn aps(&self) -> &[String] {
         self.header()
             .iter()
             .find_map(|item| match item {
-                HeaderItem::Acceptance(acceptance_sets, condition) => {
-                    Some((*acceptance_sets as usize, condition.clone()))
-                }
+                HeaderItem::AP(aps) => Some(aps.as_slice()),
                 _ => None,
             })
-            .expect("Acceptance header is missing!")
+            .unwrap_or_default()
+    }
+
+    /// Counts the number of atomic propositions in the automaton.
+    ///
+    /// # Panics
+    ///
+    /// If there are more than [`u16::MAX`] atomic propositions, which BDDs cannot
+    /// represent anyway.
+    pub fn num_aps(&self) -> u16 {
+        u16::try_from(self.aps().len())
+            .expect("more than u16::MAX atomic propositions are not supported")
+    }
+
+    /// Returns the acceptance condition of the automaton, if the header has one.
+    pub fn acceptance(&self) -> Option<HoaAcceptance> {
+        self.header().iter().find_map(|item| match item {
+            HeaderItem::Acceptance(acceptance_sets, condition) => {
+                Some((*acceptance_sets as usize, condition.clone()))
+            }
+            _ => None,
+        })
     }
 
     /// Returns the aliases of the automaton.
@@ -260,16 +234,8 @@ impl HoaRepresentation {
             .collect()
     }
 
-    /// Returns the acceptance name of the automaton.
+    /// Returns the acceptance name of the automaton, if the header has one.
     pub fn acceptance_name(&self) -> Option<(&AcceptanceName, &Vec<AcceptanceInfo>)> {
-        debug_assert!(
-            self.header()
-                .iter()
-                .filter(|item| matches!(item, HeaderItem::AcceptanceName(..)))
-                .count()
-                == 1,
-            "There must be exactly one AcceptanceName header!"
-        );
         self.header().iter().find_map(|item| match item {
             HeaderItem::AcceptanceName(name, info) => Some((name, info)),
             _ => None,
@@ -473,11 +439,63 @@ mod tests {
 
     use crate::{
         AcceptanceAtom, AcceptanceCondition, AcceptanceName, AcceptanceSignature, Body, HeaderItem,
-        HoaRepresentation, StateConjunction,
+        HoaBool, HoaRepresentation, StateConjunction,
         body::{Edge, State},
         header::Header,
         label::AnonymousAbstract,
     };
+
+    #[test]
+    fn integer_overflow_is_a_parse_error() {
+        let contents = "HOA: v1\nStates: 99999999999\n--BODY--\n--END--";
+        let err = HoaRepresentation::try_from(contents)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("integer out of range"), "{err}");
+    }
+
+    #[test]
+    fn out_of_range_ap_identifier_is_a_parse_error() {
+        let contents =
+            "HOA: v1\nAP: 1 \"a\"\nAcceptance: 0 t\n--BODY--\nState: 0\n[65536] 0\n--END--";
+        let err = HoaRepresentation::try_from(contents)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("AP identifier out of range"), "{err}");
+    }
+
+    #[test]
+    fn accessors_work_without_optional_headers() {
+        let contents = "HOA: v1\nAcceptance: 0 t\n--BODY--\n--END--";
+        let aut = HoaRepresentation::try_from(contents).expect("minimal automaton parses");
+
+        assert_eq!("v1", aut.version());
+        assert_eq!(None, aut.num_states());
+        assert!(aut.start().is_empty());
+        assert!(aut.aps().is_empty());
+        assert_eq!(0, aut.num_aps());
+        assert_eq!(
+            Some((0, AcceptanceCondition::Boolean(HoaBool(true)))),
+            aut.acceptance()
+        );
+        assert_eq!(None, aut.acceptance_name());
+        assert!(aut.header().acceptance_name().is_none());
+        assert!(aut.aliases().is_empty());
+        assert_eq!(Ok(()), aut.verify());
+    }
+
+    #[test]
+    fn accessors_work_on_default_automaton() {
+        let aut = HoaRepresentation::default();
+        assert_eq!("v1", aut.version());
+        assert_eq!(None, aut.num_states());
+        assert!(aut.start().is_empty());
+        assert!(aut.aps().is_empty());
+        assert_eq!(0, aut.num_aps());
+        assert_eq!(None, aut.acceptance());
+        assert_eq!(None, aut.acceptance_name());
+        assert_eq!(Ok(()), aut.verify());
+    }
 
     #[test]
     fn first_automaton_split_and_abort() {
