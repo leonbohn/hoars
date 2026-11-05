@@ -41,7 +41,8 @@ pub(crate) fn parse_tokens(
                 error_list.into_iter().map(|err| err.map(|c| c.to_string())),
             )
         })
-        .map_err(FromHoaError::ParserError);
+        .map_err(FromHoaError::ParserError)
+        .and_then(|aut| aut.validate().map(|()| aut));
     tracing::info!("Actual parsing took {}µs", start.elapsed().as_micros());
     out
 }

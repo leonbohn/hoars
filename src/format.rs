@@ -104,6 +104,21 @@ pub enum AcceptanceCondition {
 }
 
 impl AcceptanceCondition {
+    /// All acceptance sets mentioned in this condition.
+    pub(crate) fn sets(&self) -> Vec<Id> {
+        match self {
+            Self::Fin(a) | Self::Inf(a) => match a {
+                AcceptanceAtom::Positive(i) | AcceptanceAtom::Negative(i) => vec![*i],
+            },
+            Self::And(l, r) | Self::Or(l, r) => {
+                let mut sets = l.sets();
+                sets.extend(r.sets());
+                sets
+            }
+            Self::Boolean(_) => Vec::new(),
+        }
+    }
+
     fn parity_rec(current: u32, total: u32) -> Self {
         if current + 1 >= total {
             if current.rem(2) == 0 {

@@ -56,6 +56,18 @@ impl AbstractLabelExpression {
         }
     }
 
+    /// The highest AP index used in this expression, if any.
+    pub(crate) fn max_ap(&self) -> Option<u16> {
+        match self {
+            Self::Integer(i) => Some(*i),
+            Self::Boolean(_) | Self::Alias(_) => None,
+            Self::Negated(e) => e.max_ap(),
+            Self::Conjunction(es) | Self::Disjunction(es) => {
+                es.iter().filter_map(|e| e.max_ap()).max()
+            }
+        }
+    }
+
     /// Replaces every alias reference by its (recursively substituted) definition.
     /// `stack` holds the aliases currently being expanded and is used to detect cycles.
     pub(crate) fn substitute(

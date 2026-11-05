@@ -69,6 +69,19 @@ pub fn tokenizer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>
         _ => Token::Identifier(ident),
     });
 
+    // minor versions such as `v1.1`; the only identifiers containing a `.`
+    let version = just('v')
+        .chain(
+            filter(|c: &char| c.is_ascii_digit() || *c == '.')
+                .repeated()
+                .at_least(1),
+        )
+        .collect::<String>()
+        .try_map(|v, span| match v.contains('.') {
+            true => Ok(Token::Identifier(v)),
+            false => Err(Simple::custom(span, "not a dotted version")),
+        });
+
     let alias = just('@').ignore_then(raw_ident).map(Token::Alias);
 
     // Spot emits header names such as `spot.state-player`, so `.` is allowed here only.
@@ -90,6 +103,7 @@ pub fn tokenizer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>
         .or(end)
         .or(body)
         .or(header)
+        .or(version)
         .or(str_)
         .or(op)
         .or(paren)
