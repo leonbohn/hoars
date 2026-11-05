@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Lexer: strings follow the spec's C-like syntax (`\"` and `\\` are decoded, other escapes are kept verbatim), comments nest, and `--ABORT--` lexes as `Token::Abort` (it used to be `Token::BodyEnd`). `Token::Bool` is gone; `t`/`f` are identifiers.
+- `--ABORT--` handling works on tokens instead of substrings: `from_hoa` only rejects real aborts (not one inside a string, nor `foo--ABORT--`), and `parse_hoa_automata` and `first_automaton_split_position` lex the input once and split the token stream, so an automaton following an aborted one in the same chunk is returned. A lexer error now makes `parse_hoa_automata` return nothing, and `first_automaton_split_position` return `None`.
 - `Property` and `AcceptanceName` gained an `Other(String)` variant, and their `TryFrom<String>` impls became infallible `From<String>`. Unknown `properties:` values (e.g. `semi-deterministic`) and `acc-name:` names (e.g. `Rabin-like`) now parse and are written back verbatim.
 - Accessors no longer `debug_assert` header multiplicities that the HOA spec does not require, so they work on valid files without `States:`, `Start:`, `acc-name:` or `AP:`:
   - `HoaRepresentation::aps` returns `&[String]` (was `&Vec<String>`) and is empty when the header has no `AP:`;

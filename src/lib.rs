@@ -451,34 +451,68 @@ fn print_error_report<I: Iterator<Item = Simple<String>>>(input: &str, errs: I) 
     tracing::error!("{}", build_error_report(input, errs))
 }
 
+/// Splits a token stream into automata: each returned chunk ends with a `--END--`, a
+/// trailing chunk without `--END--` is returned last. An `--ABORT--` discards everything
+/// since the previous boundary.
+fn split_automata(tokens: Vec<(Token, lexer::Span)>) -> Vec<Vec<(Token, lexer::Span)>> {
+    let mut chunks = Vec::new();
+    let mut current = Vec::new();
+    for (token, span) in tokens {
+        match token {
+            Token::Abort => current.clear(),
+            Token::BodyEnd => {
+                current.push((token, span));
+                chunks.push(std::mem::take(&mut current));
+            }
+            _ => current.push((token, span)),
+        }
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    chunks
+}
+
 /// Returns the byte index just past the `--END--` that terminates the first
 /// automaton in `input` that was not aborted.
 ///
 /// An `--ABORT--` discards the automaton it terminates, so aborted automata
 /// never contribute a position; the search continues after the abort. Returns
-/// `None` if no `--END--` follows the last abort.
+/// `None` if no `--END--` follows the last abort, or if `input` cannot be lexed.
+/// Only real tokens count, so `--END--` or `--ABORT--` inside a string or a comment
+/// is ignored.
 pub fn first_automaton_split_position(input: &str) -> Option<usize> {
-    const ENDLEN: usize = "--END--".len();
-    const ABORTLEN: usize = "--ABORT--".len();
-
-    let mut cursor = 0;
-    loop {
-        let rest = &input[cursor..];
-        let end = cursor + rest.find("--END--")?;
-        match rest.find("--ABORT--") {
-            Some(abort) if cursor + abort < end => cursor += abort + ABORTLEN,
-            _ => return Some(end + ENDLEN),
-        }
-    }
+    let end = split_automata(input::lex(input).ok()?)
+        .into_iter()
+        .find(|chunk| matches!(chunk.last(), Some((Token::BodyEnd, _))))?
+        .pop()?
+        .1
+        .end;
+    // spans count characters, the result is a byte index
+    Some(
+        input
+            .char_indices()
+            .nth(end)
+            .map_or(input.len(), |(i, _)| i),
+    )
 }
 
+/// Parses all automata in `input`. Automata that are aborted or that fail to parse are
+/// skipped (failures are logged). If `input` cannot be lexed, nothing is returned.
 pub fn parse_hoa_automata(input: &str) -> Vec<HoaRepresentation> {
+    let tokens = match input::lex(input) {
+        Ok(tokens) => tokens,
+        Err(e) => {
+            warn!("Error when lexing automata: {}", e);
+            return Vec::new();
+        }
+    };
     let mut out = Vec::new();
-    for hoa_aut in input.split_inclusive("--END--") {
-        if !hoa_aut.contains("--BODY--") {
+    for chunk in split_automata(tokens) {
+        if !chunk.iter().any(|(t, _)| *t == Token::BodyStart) {
             continue;
         }
-        match hoa_aut.try_into() {
+        match input::parse_tokens(input, chunk) {
             Ok(aut) => out.push(aut),
             Err(e) => warn!("Error when parsing automaton: {}", e),
         }
@@ -600,6 +634,62 @@ State: 0
                 .to_string();
             assert!(err.contains(msg), "{body}: {err}");
         }
+    }
+
+    const MINIMAL: &str = "HOA: v1\nAcceptance: 0 t\n--BODY--\n--END--";
+
+    #[test]
+    fn escaped_quote_in_string() {
+        let hoa = MINIMAL.replace("v1", "v1\nname: \"a\\\"b\\\\c\\n\"");
+        let aut = HoaRepresentation::try_from(hoa.as_str()).unwrap();
+        assert!(
+            aut.header()
+                .iter()
+                .any(|i| *i == HeaderItem::Name("a\"b\\c\\n".into()))
+        );
+        // the writer escapes again, so it round-trips
+        let printed = crate::output::to_hoa(&aut);
+        assert_eq!(HoaRepresentation::try_from(printed.as_str()).unwrap(), aut);
+    }
+
+    #[test]
+    fn nested_comment() {
+        let hoa = MINIMAL.replace("v1", "v1 /*a/*b*/c*/ /* d */");
+        assert!(HoaRepresentation::try_from(hoa.as_str()).is_ok());
+        let unterminated = MINIMAL.replace("v1", "v1 /*a/*b*/c");
+        assert!(HoaRepresentation::try_from(unterminated.as_str()).is_err());
+    }
+
+    #[test]
+    fn abort_inside_string_is_not_an_abort() {
+        let hoa = MINIMAL.replace("v1", "v1\nname: \"--ABORT-- --END--\"");
+        assert!(HoaRepresentation::try_from(hoa.as_str()).is_ok());
+        assert_eq!(super::parse_hoa_automata(&hoa).len(), 1);
+        assert_eq!(super::first_automaton_split_position(&hoa), Some(hoa.len()));
+    }
+
+    #[test]
+    fn abort_in_header_followed_by_valid_automaton() {
+        let input = format!("HOA: v1\nStates: 3\n--ABORT--\n{MINIMAL}");
+        let auts = super::parse_hoa_automata(&input);
+        assert_eq!(auts.len(), 1);
+        assert_eq!(auts[0], HoaRepresentation::try_from(MINIMAL).unwrap());
+        assert!(matches!(
+            HoaRepresentation::try_from(input.as_str()),
+            Err(super::FromHoaError::Abort)
+        ));
+    }
+
+    #[test]
+    fn abort_suffix_is_an_identifier() {
+        let hoa = MINIMAL.replace("v1", "v1\nfoo--ABORT--: 1\nacc-name: foo--ABORT--");
+        let aut = HoaRepresentation::try_from(hoa.as_str()).unwrap();
+        assert!(
+            aut.header()
+                .iter()
+                .any(|i| matches!(i, HeaderItem::Unknown(n, _) if n == "foo--ABORT--"))
+        );
+        assert_eq!(super::parse_hoa_automata(&hoa).len(), 1);
     }
 
     #[test]
