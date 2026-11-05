@@ -417,18 +417,23 @@ fn print_error_report<I: Iterator<Item = Simple<String>>>(input: &str, errs: I) 
     tracing::error!("{}", build_error_report(input, errs))
 }
 
+/// Returns the byte index just past the `--END--` that terminates the first
+/// automaton in `input` that was not aborted.
+///
+/// An `--ABORT--` discards the automaton it terminates, so aborted automata
+/// never contribute a position; the search continues after the abort. Returns
+/// `None` if no `--END--` follows the last abort.
 pub fn first_automaton_split_position(input: &str) -> Option<usize> {
     const ENDLEN: usize = "--END--".len();
+    const ABORTLEN: usize = "--ABORT--".len();
 
-    'outer: loop {
-        {
-            let end = input.find("--END--")?;
-            if let Some(abort) = input.find("--ABORT--")
-                && abort < end
-            {
-                continue 'outer;
-            }
-            return Some(end + ENDLEN);
+    let mut cursor = 0;
+    loop {
+        let rest = &input[cursor..];
+        let end = cursor + rest.find("--END--")?;
+        match rest.find("--ABORT--") {
+            Some(abort) if cursor + abort < end => cursor += abort + ABORTLEN,
+            _ => return Some(end + ENDLEN),
         }
     }
 }
@@ -465,6 +470,32 @@ mod tests {
 
         let first = super::first_automaton_split_position(contents);
         assert_eq!(first, Some(15));
+    }
+
+    #[test]
+    fn first_automaton_abort_before_end() {
+        let contents = "--ABORT--\n--END--";
+
+        let first = super::first_automaton_split_position(contents);
+        assert_eq!(first, Some(contents.len()));
+    }
+
+    #[test]
+    fn first_automaton_multiple_aborts() {
+        let contents = "--ABORT--\nHOA: v1\n--ABORT--\nHOA: v1\n--END--";
+
+        let first = super::first_automaton_split_position(contents);
+        assert_eq!(first, Some(contents.len()));
+    }
+
+    #[test]
+    fn first_automaton_abort_and_no_end() {
+        assert_eq!(super::first_automaton_split_position("--ABORT--\n"), None);
+        assert_eq!(
+            super::first_automaton_split_position("--ABORT--\n--ABORT--\n"),
+            None
+        );
+        assert_eq!(super::first_automaton_split_position("HOA: v1\n"), None);
     }
 
     #[test]
