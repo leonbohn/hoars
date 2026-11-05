@@ -64,9 +64,15 @@ pub fn tokenizer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>
 
     let alias = just('@').ignore_then(raw_ident).map(Token::Alias);
 
-    let header = ident
+    // Spot emits header names such as `spot.state-player`, so `.` is allowed here only.
+    let header = filter(|c: &char| c.is_ascii_alphabetic() || *c == '_')
+        .chain(
+            filter(|c: &char| c.is_ascii_alphanumeric() || matches!(*c, '_' | '-' | '.'))
+                .repeated(),
+        )
+        .collect::<String>()
         .then_ignore(just(':'))
-        .map(|header_name| Token::Header(header_name.to_string()));
+        .map(Token::Header);
 
     let body = just("--BODY--").to(Token::BodyStart);
     let end = just("--END--").to(Token::BodyEnd);

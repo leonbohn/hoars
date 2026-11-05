@@ -35,6 +35,20 @@ pub enum HeaderItem {
     Name(String),
     /// (>=0) Gives the properties of the automaton.
     Properties(Vec<Property>),
+    /// A header item this crate does not know. The spec allows ignoring those
+    /// whose name starts with a lowercase letter; they are kept to allow round-tripping.
+    Unknown(String, Vec<UnknownValue>),
+}
+
+/// A value of an [`HeaderItem::Unknown`] header item.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum UnknownValue {
+    /// An integer.
+    Int(String),
+    /// A quoted string (without the quotes).
+    Text(String),
+    /// An identifier.
+    Identifier(String),
 }
 
 impl HeaderItem {
@@ -130,6 +144,33 @@ fn item() -> impl Parser<Token, HeaderItem, Error = Simple<Token>> {
         )
         .map(HeaderItem::Properties);
 
+    const KNOWN: [&str; 9] = [
+        "HOA",
+        "States",
+        "Start",
+        "AP",
+        "Alias",
+        "Acceptance",
+        "acc-name",
+        "tool",
+        "name",
+    ];
+    let unknown = select! { Token::Header(name) if !KNOWN.contains(&name.as_str()) && name != "properties" => name }
+        .then(
+            select! {
+                Token::Int(i) => UnknownValue::Int(i),
+                Token::Text(t) => UnknownValue::Text(t),
+                Token::Identifier(i) => UnknownValue::Identifier(i),
+            }
+            .repeated(),
+        )
+        .map(|(name, values)| {
+            if name.starts_with(|c: char| c.is_ascii_uppercase()) {
+                tracing::warn!("ignoring unknown header item {name}");
+            }
+            HeaderItem::Unknown(name, values)
+        });
+
     chumsky::primitive::choice((
         states,
         acceptance,
@@ -140,6 +181,7 @@ fn item() -> impl Parser<Token, HeaderItem, Error = Simple<Token>> {
         name,
         tool,
         properties,
+        unknown,
     ))
 }
 
@@ -294,6 +336,47 @@ mod tests {
             ],
         );
         assert_fails("tool: ltl-translate \"1.2-alpha\"");
+    }
+
+    #[test]
+    fn unknown_items() {
+        assert_header(
+            "controllable-AP: 0 1\nspot.state-player: 0 1 1\nFoo: \"x\" bar",
+            &[
+                HeaderItem::Version("v1".into()),
+                HeaderItem::Unknown(
+                    "controllable-AP".into(),
+                    vec![UnknownValue::Int("0".into()), UnknownValue::Int("1".into())],
+                ),
+                HeaderItem::Unknown(
+                    "spot.state-player".into(),
+                    vec![
+                        UnknownValue::Int("0".into()),
+                        UnknownValue::Int("1".into()),
+                        UnknownValue::Int("1".into()),
+                    ],
+                ),
+                HeaderItem::Unknown(
+                    "Foo".into(),
+                    vec![
+                        UnknownValue::Text("x".into()),
+                        UnknownValue::Identifier("bar".into()),
+                    ],
+                ),
+            ],
+        );
+    }
+
+    #[test]
+    fn unknown_items_round_trip() {
+        let hoa = "HOA: v1\nStates: 1\nStart: 0\nAP: 0\nAcceptance: 0 t\ncontrollable-AP: 0 1\nspot.state-player: 0\n--BODY--\nState: 0\n--END--";
+        let aut = crate::parse_hoa_automata(hoa).remove(0);
+        let out = crate::output::to_hoa(&aut);
+        assert!(out.contains("controllable-AP: 0 1\nspot.state-player: 0\n--BODY--"));
+        assert_eq!(
+            crate::parse_hoa_automata(&out).remove(0).header(),
+            aut.header()
+        );
     }
 
     #[test]

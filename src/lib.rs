@@ -30,7 +30,7 @@ pub use format::{
 };
 
 pub use body::{Body, Edge, State};
-pub use header::{Header, HeaderItem};
+pub use header::{Header, HeaderItem, UnknownValue};
 
 use itertools::Itertools;
 use lexer::Token;

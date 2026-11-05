@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `HeaderItem::Unknown(name, values)` (with `UnknownValue`): unknown header items such as `controllable-AP:` or `spot.state-player:` are now parsed, kept, and written back out instead of being a parse error. Unknown names starting with an uppercase letter log a `tracing` warning. Header names may now contain `.`.
+
 ### Changed
 
 - Accessors no longer `debug_assert` header multiplicities that the HOA spec does not require, so they work on valid files without `States:`, `Start:`, `acc-name:` or `AP:`:

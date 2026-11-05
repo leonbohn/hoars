@@ -6,7 +6,7 @@ use itertools::Itertools;
 use crate::{
     AcceptanceAtom, AcceptanceCondition, AcceptanceInfo, AcceptanceName, AcceptanceSignature,
     AliasName, Edge, HeaderItem, HoaBool, HoaRepresentation, Label, LabelExpression, Property,
-    State, StateConjunction,
+    State, StateConjunction, UnknownValue,
 };
 
 /// Quotes a string for use in HOA, escaping backslashes and double quotes.
@@ -81,6 +81,16 @@ impl Display for HeaderItem {
             HeaderItem::Name(name) => write!(f, "name: {}", quote(name)),
             HeaderItem::Properties(properties) => {
                 write!(f, "properties: {}", properties.iter().join(" "))
+            }
+            HeaderItem::Unknown(name, values) => {
+                write!(f, "{name}:")?;
+                for value in values {
+                    match value {
+                        UnknownValue::Int(s) | UnknownValue::Identifier(s) => write!(f, " {s}")?,
+                        UnknownValue::Text(s) => write!(f, " {}", quote(s))?,
+                    }
+                }
+                Ok(())
             }
         }
     }
