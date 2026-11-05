@@ -519,9 +519,8 @@ fn build_error_report<'a, T: std::fmt::Display + 'a>(
     errs.into_iter()
         .map(|e| {
             let span = e.span().into_range();
-            let report = ariadne::Report::build(ReportKind::Error, span.clone()).with_config(
-                ariadne::Config::default().with_index_type(ariadne::IndexType::Byte),
-            );
+            let report = ariadne::Report::build(ReportKind::Error, span.clone())
+                .with_config(ariadne::Config::default().with_index_type(ariadne::IndexType::Byte));
             let (message, label) = match e.reason() {
                 RichReason::Custom(msg) => (msg.clone(), msg.clone()),
                 _ => {

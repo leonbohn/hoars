@@ -47,7 +47,9 @@ impl std::fmt::Display for Token<'_> {
     }
 }
 
-pub fn tokenizer<'a>() -> impl Parser<'a, &'a str, Vec<(Token<'a>, Span)>, extra::Err<Rich<'a, char, Span>>>
+/// Lexer. Its error type is `Cheap` on purpose: tracking what was expected at every failed
+/// alternative made lexing 4-5x slower, and `input::lex` reports the offending character itself.
+pub fn tokenizer<'a>() -> impl Parser<'a, &'a str, Vec<(Token<'a>, Span)>, extra::Err<Cheap<Span>>>
 {
     let int = text::int(10).map(Token::Int);
 
@@ -100,10 +102,8 @@ pub fn tokenizer<'a>() -> impl Parser<'a, &'a str, Vec<(Token<'a>, Span)>, extra
                 .at_least(1),
         )
         .to_slice()
-        .try_map(|v: &str, span| match v.contains('.') {
-            true => Ok(Token::Identifier(v)),
-            false => Err(Rich::custom(span, "not a dotted version")),
-        });
+        .filter(|v: &&str| v.contains('.'))
+        .map(Token::Identifier);
 
     let alias = just('@').ignore_then(raw_ident).map(Token::Alias);
 
@@ -123,15 +123,17 @@ pub fn tokenizer<'a>() -> impl Parser<'a, &'a str, Vec<(Token<'a>, Span)>, extra
     let end_ = just("--END--").to(Token::BodyEnd);
     let abort = just("--ABORT--").to(Token::Abort);
 
-    let token = int
+    // first characters of the alternatives are disjoint except for header, version, ident
+    // (tried in that order), so the cheap single-character tokens come first
+    let token = op
+        .or(paren)
+        .or(int)
         .or(abort)
         .or(end_)
         .or(body)
         .or(header)
         .or(version)
         .or(str_)
-        .or(op)
-        .or(paren)
         .or(alias)
         .or(ident);
 

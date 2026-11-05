@@ -8,7 +8,21 @@ pub(crate) fn lex(input: &str) -> Result<Vec<(Token<'_>, lexer::Span)>, FromHoaE
     let tokens = lexer::tokenizer()
         .parse(input)
         .into_result()
-        .map_err(|errors| build_error_report(input, errors))
+        .map_err(|errors| {
+            build_error_report::<char>(
+                input,
+                errors.into_iter().map(|e| {
+                    let found = input[e.span().start..].chars().next();
+                    chumsky::error::Rich::custom(
+                        *e.span(),
+                        match found {
+                            Some(c) => format!("unexpected character {c:?}"),
+                            None => "unexpected end of input".to_string(),
+                        },
+                    )
+                }),
+            )
+        })
         .map_err(FromHoaError::LexerError)?;
     tracing::info!("Tokenization took {}µs", start.elapsed().as_micros());
     Ok(tokens)

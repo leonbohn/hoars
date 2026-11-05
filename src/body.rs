@@ -4,7 +4,9 @@ use chumsky::prelude::*;
 
 use crate::{
     AbstractLabelExpression, AcceptanceSignature, AtomicProposition, Id, Label, LabelExpression,
-    StateConjunction, lexer::{Err, TokInput, Token}, value,
+    StateConjunction,
+    lexer::{Err, TokInput, Token},
+    value,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -269,11 +271,13 @@ impl DerefMut for Body {
 
 #[cfg(test)]
 mod tests {
-    use chumsky::{Parser, input::Stream, prelude::{Input, end}};
-
-    use crate::{
-        AbstractLabelExpression, Edge, Label, StateConjunction, label::AnonymousAbstract,
+    use chumsky::{
+        Parser,
+        input::Stream,
+        prelude::{Input, end},
     };
+
+    use crate::{AbstractLabelExpression, Edge, Label, StateConjunction, label::AnonymousAbstract};
 
     use super::State;
 

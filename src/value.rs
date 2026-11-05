@@ -62,15 +62,14 @@ pub fn acceptance_signature<'a, I: TokInput<'a>>()
         .map(AcceptanceSignature)
 }
 
-pub fn acceptance_info<'a, I: TokInput<'a>>()
--> impl Parser<'a, I, AcceptanceInfo, Err<'a>> + Clone {
+pub fn acceptance_info<'a, I: TokInput<'a>>() -> impl Parser<'a, I, AcceptanceInfo, Err<'a>> + Clone
+{
     identifier()
         .map(AcceptanceInfo::Identifier)
         .or(integer().map(AcceptanceInfo::Int))
 }
 
-fn ap_index<'a, I: TokInput<'a>>()
--> impl Parser<'a, I, AbstractLabelExpression, Err<'a>> + Clone {
+fn ap_index<'a, I: TokInput<'a>>() -> impl Parser<'a, I, AbstractLabelExpression, Err<'a>> + Clone {
     integer().try_map(|i, span| {
         u16::try_from(i)
             .map(AbstractLabelExpression::Integer)
@@ -140,12 +139,13 @@ pub fn acceptance_condition<'a, I: TokInput<'a>>()
             .then(atom_value.delimited_by(just(Token::Paren('(')), just(Token::Paren(')'))))
             .map(|(f, atom)| f(atom));
 
-        let atom = boolean()
-            .map(HoaBool)
-            .map(AcceptanceCondition::Boolean)
-            .or(fin_inf_atom)
-            .or(acceptance_condition
-                .delimited_by(just(Token::Paren('(')), just(Token::Paren(')'))));
+        let atom =
+            boolean()
+                .map(HoaBool)
+                .map(AcceptanceCondition::Boolean)
+                .or(fin_inf_atom)
+                .or(acceptance_condition
+                    .delimited_by(just(Token::Paren('(')), just(Token::Paren(')'))));
 
         let conjunction = atom.clone().foldl(
             just(Token::Op('&'))

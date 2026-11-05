@@ -5,8 +5,8 @@ use chumsky::{prelude::*, select};
 use crate::{
     AbstractLabelExpression, AcceptanceCondition, AcceptanceInfo, AcceptanceName, AliasName, Id,
     Property, Token,
-    lexer::{Err, TokInput},
     format::{AtomicProposition, StateConjunction},
+    lexer::{Err, TokInput},
     value,
 };
 
@@ -97,7 +97,11 @@ fn item<'a, I: TokInput<'a>>() -> impl Parser<'a, I, HeaderItem, Err<'a>> {
         .map(|(name, info)| HeaderItem::AcceptanceName(name, info));
 
     let start = just(Token::Header("Start"))
-        .ignore_then(value::integer().separated_by(just(Token::Op('&'))).collect())
+        .ignore_then(
+            value::integer()
+                .separated_by(just(Token::Op('&')))
+                .collect(),
+        )
         .map(|conjunction| HeaderItem::Start(StateConjunction(conjunction)));
 
     let aps = just(Token::Header("AP"))
