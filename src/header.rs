@@ -429,74 +429,40 @@ mod tests {
         )
     }
 
-    // #[test]
-    // fn alias() {
-    // assert_header(
-    //     "Alias: @a 0",
-    //     &[
-    //         HeaderItem::Version("v1".to_string()),
-    //         HeaderItem::Alias(AliasName("a".to_string()), LabelExpression::Integer(0)),
-    //     ],
-    // );
-    //     assert_header(
-    //         "Alias: @a 0 & 1",
-    //         &[
-    //             HeaderItem::Version("v1".to_string()),
-    //             HeaderItem::Alias(
-    //                 AliasName("a".to_string()),
-    //                 LabelExpression::And(
-    //                     Box::new(LabelExpression::Integer(0)),
-    //                     Box::new(LabelExpression::Integer(1)),
-    //                 ),
-    //             ),
-    //         ],
-    //     );
-
-    //     // & binds stronger
-    //     assert_header(
-    //         "Alias: @a 1 | 2 & 0",
-    //         &[
-    //             HeaderItem::Version("v1".to_string()),
-    //             HeaderItem::Alias(
-    //                 AliasName("a".to_string()),
-    //                 LabelExpression::Or(
-    //                     Box::new(LabelExpression::Integer(1)),
-    //                     Box::new(LabelExpression::And(
-    //                         Box::new(LabelExpression::Integer(2)),
-    //                         Box::new(LabelExpression::Integer(0)),
-    //                     )),
-    //                 ),
-    //             ),
-    //         ],
-    //     );
-    //     assert_header(
-    //         "Alias: @a 0 & 1 | 2",
-    //         &[
-    //             HeaderItem::Version("v1".to_string()),
-    //             HeaderItem::Alias(
-    //                 AliasName("a".to_string()),
-    //                 LabelExpression::Or(
-    //                     Box::new(LabelExpression::And(
-    //                         Box::new(LabelExpression::Integer(0)),
-    //                         Box::new(LabelExpression::Integer(1)),
-    //                     )),
-    //                     Box::new(LabelExpression::Integer(2)),
-    //                 ),
-    //             ),
-    //         ],
-    //     );
-
-    //     assert_header(
-    //         "Alias: @a (0 | 1) & 2",
-    //         &[
-    //             HeaderItem::Version("v1".to_string()),
-    //             HeaderItem::Alias(
-    //                 AliasName("a".to_string()),
-    //                 Label,
-    //             ),
-    //         ],
-    //     );
-    // }
-    // #[test]
-    // fn multiple_headers() {}
+    #[test]
+    fn alias() {
+        use AbstractLabelExpression::*;
+        let alias = |x| HeaderItem::Alias(AliasName("a".to_string()), x);
+        let v1 = HeaderItem::Version("v1".to_string());
+        assert_header("Alias: @a 0", &[v1.clone(), alias(Integer(0))]);
+        assert_header(
+            "Alias: @a 0 & 1",
+            &[v1.clone(), alias(Conjunction(vec![Integer(0), Integer(1)]))],
+        );
+        // & binds stronger
+        assert_header(
+            "Alias: @a 1 | 2 & 0",
+            &[
+                v1.clone(),
+                alias(Disjunction(vec![
+                    Integer(1),
+                    Conjunction(vec![Integer(2), Integer(0)]),
+                ])),
+            ],
+        );
+        assert_header(
+            "Alias: @a (0 | 1) & 2",
+            &[
+                v1.clone(),
+                alias(Conjunction(vec![
+                    Disjunction(vec![Integer(0), Integer(1)]),
+                    Integer(2),
+                ])),
+            ],
+        );
+        assert_header(
+            "Alias: @a !@b",
+            &[v1, alias(Negated(Box::new(Alias("b".to_string()))))],
+        );
+    }
 }

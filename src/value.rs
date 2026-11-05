@@ -84,8 +84,8 @@ pub fn label_expression() -> impl Parser<Token, AbstractLabelExpression, Error =
     recursive(|label_expression| {
         let value = boolean()
             .map(AbstractLabelExpression::Boolean)
-            .or(ap_index());
-        // .or(alias_name().map(|aname| LabelExpression::Alias(AliasName(aname))));
+            .or(ap_index())
+            .or(alias_name().map(AbstractLabelExpression::Alias));
 
         let atom = value
             .or(label_expression.delimited_by(just(Token::Paren('(')), just(Token::Paren(')'))));

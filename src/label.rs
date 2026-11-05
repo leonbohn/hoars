@@ -17,6 +17,9 @@ impl Deref for Label {
 pub enum AbstractLabelExpression {
     Boolean(bool),
     Integer(u16),
+    /// A reference to an alias (`@name`, stored without the `@`); see
+    /// [`crate::HoaRepresentation::unalias`].
+    Alias(String),
     Negated(Box<AbstractLabelExpression>),
     Conjunction(Vec<AbstractLabelExpression>),
     Disjunction(Vec<AbstractLabelExpression>),
@@ -40,6 +43,9 @@ impl AbstractLabelExpression {
                     Err(format!("AP identifier {i} is too high"))
                 }
             }
+            AbstractLabelExpression::Alias(name) => Err(format!(
+                "alias @{name} is not resolved, call `HoaRepresentation::unalias` first"
+            )),
             AbstractLabelExpression::Negated(e) => Ok(e.try_into_bdd(vs)?.not()),
             AbstractLabelExpression::Conjunction(cs) => cs
                 .iter()
@@ -48,6 +54,38 @@ impl AbstractLabelExpression {
                 .iter()
                 .try_fold(vs.mk_false(), |acc, d| Ok(acc.or(&d.try_into_bdd(vs)?))),
         }
+    }
+
+    /// Replaces every alias reference by its (recursively substituted) definition.
+    /// `stack` holds the aliases currently being expanded and is used to detect cycles.
+    pub(crate) fn substitute(
+        &self,
+        defs: &std::collections::HashMap<String, AbstractLabelExpression>,
+        stack: &mut Vec<String>,
+    ) -> Result<Self, String> {
+        let many = |es: &[Self], stack: &mut Vec<String>| {
+            es.iter()
+                .map(|e| e.substitute(defs, stack))
+                .collect::<Result<Vec<_>, _>>()
+        };
+        Ok(match self {
+            Self::Alias(name) => {
+                if stack.contains(name) {
+                    return Err(format!("alias @{name} is defined in terms of itself"));
+                }
+                let def = defs
+                    .get(name)
+                    .ok_or(format!("alias @{name} is not defined"))?;
+                stack.push(name.clone());
+                let out = def.substitute(defs, stack);
+                stack.pop();
+                out?
+            }
+            Self::Negated(e) => Self::Negated(Box::new(e.substitute(defs, stack)?)),
+            Self::Conjunction(es) => Self::Conjunction(many(es, stack)?),
+            Self::Disjunction(es) => Self::Disjunction(many(es, stack)?),
+            Self::Boolean(_) | Self::Integer(_) => self.clone(),
+        })
     }
 
     /// Converts this expression into a [`Bdd`] over `num_aps` anonymous variables.

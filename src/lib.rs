@@ -234,6 +234,43 @@ impl HoaRepresentation {
             .collect()
     }
 
+    /// Replaces all alias references (`@name`) in the aliases and in the edge labels by
+    /// their definitions. The `Alias:` header items are kept. Fails on undefined or
+    /// cyclic aliases; on error the automaton is left unchanged.
+    ///
+    /// Parsing does not unalias, so call this before converting labels to BDDs.
+    pub fn unalias(&mut self) -> Result<(), String> {
+        let raw: std::collections::HashMap<_, _> = self
+            .aliases()
+            .into_iter()
+            .map(|(name, expr)| (name.0, expr))
+            .collect();
+        let defs = raw
+            .iter()
+            .map(|(name, expr)| {
+                Ok((
+                    name.clone(),
+                    expr.substitute(&raw, &mut vec![name.clone()])?,
+                ))
+            })
+            .collect::<Result<std::collections::HashMap<_, _>, String>>()?;
+        let mut body = self.body.clone();
+        for edge in body.iter_mut().flat_map(|s| s.edges_mut()) {
+            if let LabelExpression::Abstract(expr) = &edge.label().0 {
+                edge.0 = Label(LabelExpression::Abstract(
+                    expr.substitute(&defs, &mut vec![])?,
+                ));
+            }
+        }
+        for item in self.header.iter_mut() {
+            if let HeaderItem::Alias(name, expr) = item {
+                *expr = defs[&name.0].clone();
+            }
+        }
+        self.body = body;
+        Ok(())
+    }
+
     /// Returns the acceptance name of the automaton, if the header has one.
     pub fn acceptance_name(&self) -> Option<(&AcceptanceName, &Vec<AcceptanceInfo>)> {
         self.header().iter().find_map(|item| match item {
@@ -273,6 +310,7 @@ impl std::fmt::Display for AbstractLabelExpression {
                 false => write!(f, "f"),
             },
             AbstractLabelExpression::Integer(i) => write!(f, "{i}"),
+            AbstractLabelExpression::Alias(name) => write!(f, "@{name}"),
             AbstractLabelExpression::Negated(expr) => {
                 if is_atom(expr) {
                     write!(f, "!{}", expr)
@@ -310,7 +348,9 @@ impl std::fmt::Display for AbstractLabelExpression {
 fn is_atom(expr: &AbstractLabelExpression) -> bool {
     matches!(
         expr,
-        AbstractLabelExpression::Boolean(_) | AbstractLabelExpression::Integer(_)
+        AbstractLabelExpression::Boolean(_)
+            | AbstractLabelExpression::Integer(_)
+            | AbstractLabelExpression::Alias(_)
     )
 }
 
@@ -444,6 +484,67 @@ mod tests {
         header::Header,
         label::AnonymousAbstract,
     };
+
+    const ALIASED: &str = "HOA: v1
+States: 1
+Start: 0
+AP: 2 \"a\" \"b\"
+Alias: @x 0 & 1
+Alias: @y !@x | 0
+Acceptance: 1 Inf(0)
+--BODY--
+State: 0
+[@y] 0 {0}
+[@x & !0] 0
+--END--";
+
+    #[test]
+    fn aliases_in_edges_and_aliases_unalias_convert_and_round_trip() {
+        let mut aut = HoaRepresentation::try_from(ALIASED).unwrap();
+        let printed = crate::output::to_hoa(&aut);
+        assert_eq!(HoaRepresentation::try_from(printed.as_str()).unwrap(), aut);
+        assert!(printed.contains("[@y] 0"), "{printed}");
+
+        let before = aut.clone();
+        aut.unalias().unwrap();
+        let printed = crate::output::to_hoa(&aut);
+        assert!(printed.contains("Alias: @y !(0 & 1) | 0"), "{printed}");
+        assert!(printed.contains("[!(0 & 1) | 0] 0 {0}"), "{printed}");
+        // printing flattens nested conjunctions, so compare the labels as BDDs
+        let reparsed = HoaRepresentation::try_from(printed.as_str()).unwrap();
+        let vs = biodivine_lib_bdd::BddVariableSet::new_anonymous(2);
+        let bdds = |a: &HoaRepresentation| {
+            a.body()[0]
+                .edges()
+                .iter()
+                .map(|e| {
+                    let crate::LabelExpression::Abstract(l) = &e.label().0 else {
+                        panic!()
+                    };
+                    l.try_into_bdd(&vs).unwrap()
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(bdds(&aut), bdds(&reparsed));
+        // unresolved aliases do not convert
+        let crate::LabelExpression::Abstract(l) = &before.body()[0].edges()[0].label().0 else {
+            panic!()
+        };
+        assert!(l.try_into_bdd(&vs).is_err());
+    }
+
+    #[test]
+    fn unalias_rejects_undefined_and_cyclic_aliases() {
+        let undefined = ALIASED.replace("[@x & !0]", "[@z]");
+        let mut aut = HoaRepresentation::try_from(undefined.as_str()).unwrap();
+        let before = aut.clone();
+        assert!(aut.unalias().unwrap_err().contains("@z is not defined"));
+        assert_eq!(aut, before);
+
+        let cyclic = ALIASED.replace("Alias: @x 0 & 1", "Alias: @x @y");
+        let mut aut = HoaRepresentation::try_from(cyclic.as_str()).unwrap();
+        assert!(aut.unalias().unwrap_err().contains("itself"));
+    }
 
     #[test]
     fn integer_overflow_is_a_parse_error() {
