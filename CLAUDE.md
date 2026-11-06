@@ -23,12 +23,12 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 - `src/header.rs`, `src/body.rs`, `src/value.rs`: parsers/types for the header items, the body (states, edges), and values (integers, acceptance expressions, labels via `biodivine-lib-bdd`).
 - `src/format.rs`, `src/output.rs`: writing HOA. `src/interpretation.rs`: unaliasing and interpretation of the parsed automaton.
 - `src/lib.rs`: `HoaAutomaton` (header + body), `from_parts`, `from_hoa` helpers.
-- `hoa/`: sample HOA files used by tests; `doc/hoaf.pdf`: the format specification.
+- `hoa/`: sample HOA files used by tests (`spec/`, `spot/`; `bench/` is for benchmarks only); `doc/hoaf.pdf`: the format specification.
 
 ## Known sharp edges
 
 - Parsers use `chumsky` 0.9 (`Simple<Token>` errors), flagged with `allow(clippy::result_large_err)` in several places.
-- Test coverage is small (10 unit tests); no fuzzing.
+- 51 unit tests, including one that parses, round-trips and converts every fixture in `hoa/` (`hoa/spec/` holds the spec examples, `hoa/spot/` real Spot output); no fuzzing.
 - Version `0.3.0` is the first release since crates.io `0.2.0` (breaking: `biodivine-lib-bdd` 0.6).
 
 ## Benchmarks

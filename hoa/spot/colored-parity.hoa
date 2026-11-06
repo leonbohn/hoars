@@ -1,0 +1,15 @@
+HOA: v1
+name: "F(Ga | GFb)"
+States: 1
+Start: 0
+AP: 2 "a" "b"
+acc-name: parity min even 3
+Acceptance: 3 Inf(0) | (Fin(1) & Inf(2))
+properties: trans-labels explicit-labels trans-acc colored complete
+properties: deterministic stutter-invariant
+--BODY--
+State: 0
+[1] 0 {0}
+[!0&!1] 0 {1}
+[0&!1] 0 {2}
+--END--

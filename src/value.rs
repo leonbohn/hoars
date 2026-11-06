@@ -180,8 +180,15 @@ pub fn identifier<'a, X: HoaErr<'a>>() -> impl Parser<'a, &'a str, String, extra
 }
 
 pub fn alias_name<'a, X: HoaErr<'a>>() -> impl Parser<'a, &'a str, String, extra::Err<X>> + Clone {
+    // unlike identifiers, alias names may start with a digit (Spot emits `@0`, `@1`, ...)
     just('@')
-        .ignore_then(ident_raw())
+        .ignore_then(
+            any()
+                .filter(|c: &char| c.is_ascii_alphanumeric() || matches!(*c, '_' | '-'))
+                .repeated()
+                .at_least(1)
+                .to_slice(),
+        )
         .then_ignore(ws())
         .map(str::to_string)
 }

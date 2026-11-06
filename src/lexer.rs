@@ -98,7 +98,16 @@ pub fn tokenizer<'a>() -> impl Parser<'a, &'a str, Vec<(Token<'a>, Span)>, extra
         .filter(|v: &&str| v.contains('.'))
         .map(Token::Identifier);
 
-    let alias = just('@').ignore_then(raw_ident).map(Token::Alias);
+    // unlike identifiers, alias names may start with a digit (Spot emits `@0`, `@1`, ...)
+    let alias = just('@')
+        .ignore_then(
+            any()
+                .filter(|c: &char| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+                .repeated()
+                .at_least(1)
+                .to_slice(),
+        )
+        .map(Token::Alias);
 
     // Spot emits header names such as `spot.state-player`, so `.` is allowed here only.
     let header = any()

@@ -445,8 +445,6 @@ pub fn parse_hoa_automata(input: &str) -> Vec<HoaRepresentation> {
 
 #[cfg(test)]
 mod tests {
-    use tracing::error;
-
     use crate::{
         AcceptanceAtom, AcceptanceCondition, AcceptanceName, AcceptanceSignature, Body, HeaderItem,
         HoaBool, HoaRepresentation, StateConjunction,
@@ -815,6 +813,52 @@ State: 0
         assert!(err.contains("State 0 is defined more than once!"), "{err}");
     }
 
+    /// Every file in `hoa/` (not the benchmarks) parses, round-trips and converts to BDDs.
+    #[test]
+    fn fixtures_parse_round_trip_and_convert() {
+        fn collect(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    if path.file_name().is_some_and(|n| n != "bench") {
+                        collect(&path, out);
+                    }
+                } else if path.extension().is_some_and(|e| e == "hoa") {
+                    out.push(path);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        collect(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("hoa"),
+            &mut files,
+        );
+        assert!(files.len() >= 20, "found only {} fixtures", files.len());
+        for path in files {
+            let name = path.display();
+            let text = std::fs::read_to_string(&path).unwrap();
+            // some files hold several automata, and parse_hoa_automata skips failures
+            let auts = crate::parse_hoa_automata(&text);
+            assert_eq!(auts.len(), text.matches("--END--").count(), "{name}");
+            for mut aut in auts {
+                let printed = crate::output::to_hoa(&aut);
+                let reparsed = HoaRepresentation::try_from(printed.as_str())
+                    .unwrap_or_else(|e| panic!("{name}: reprint does not parse: {e}\n{printed}"));
+                assert_eq!(reparsed, aut, "{name}: round trip changed the automaton");
+                aut.unalias().unwrap_or_else(|e| panic!("{name}: {e}"));
+                let vs = biodivine_lib_bdd::BddVariableSet::new_anonymous(aut.num_aps());
+                for state in aut.body().iter() {
+                    for edge in state.edges() {
+                        if let crate::LabelExpression::Abstract(l) = &edge.label().0 {
+                            l.try_into_bdd(&vs)
+                                .unwrap_or_else(|e| panic!("{name}: label to BDD: {e}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn real_test_1() {
         let contents = r#"HOA: v1
@@ -835,12 +879,7 @@ State: 0
               [!0] 2
              --END--
              "#;
-        let hoa_aut = HoaRepresentation::try_from(contents);
-
-        if let Err(err) = hoa_aut {
-            error!("Encountered parsing error\n{}", err);
-            return;
-        }
+        let hoa_aut = HoaRepresentation::try_from(contents).unwrap();
 
         let header = Header::from_items(vec![
             HeaderItem::Version("v1".to_string()),
@@ -902,10 +941,7 @@ State: 0
         );
         assert_eq!(
             hoa_aut,
-            Ok(HoaRepresentation::from_parts(
-                header,
-                Body::from(vec![q0, q1, q2])
-            ))
+            HoaRepresentation::from_parts(header, Body::from(vec![q0, q1, q2]))
         )
     }
 }
