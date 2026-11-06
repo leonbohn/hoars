@@ -131,23 +131,38 @@ pub fn tokenizer<'a>() -> impl Parser<'a, &'a str, Vec<(Token<'a>, Span)>, extra
         op, paren, int, abort, end_, body, header, version, str_, alias, ident,
     ));
 
-    // comments nest: `/*a/*b*/c*/` is a single comment
-    let comment = recursive(|comment| {
-        just("/*")
-            .ignore_then(
-                comment
-                    .or(any().and_is(just("*/").not()).ignored())
-                    .repeated(),
-            )
-            .then_ignore(just("*/"))
-            .ignored()
-    })
-    .padded();
+    // Whitespace and nested comments (`/*a/*b*/c*/` is one comment). A depth counter instead
+    // of a recursive grammar: backtracking over unclosed `/*` was exponential (found by fuzzing).
+    let layout = custom(
+        |inp: &mut chumsky::input::InputRef<'a, '_, &'a str, extra::Err<Cheap<Span>>>| {
+            let start = inp.cursor();
+            let mut depth = 0usize;
+            loop {
+                let before = inp.save();
+                match inp.next() {
+                    Some(c) if depth == 0 && c.is_whitespace() => {}
+                    Some('/') if inp.peek() == Some('*') => {
+                        inp.skip();
+                        depth += 1;
+                    }
+                    Some('*') if depth > 0 && inp.peek() == Some('/') => {
+                        inp.skip();
+                        depth -= 1;
+                    }
+                    Some(_) if depth > 0 => {}
+                    None if depth > 0 => return Err(Cheap::new(inp.span_since(&start))),
+                    _ => {
+                        inp.rewind(before);
+                        return Ok(());
+                    }
+                }
+            }
+        },
+    );
 
     token
         .map_with(|tok, e| (tok, e.span()))
-        .padded_by(comment.repeated())
-        .padded()
+        .padded_by(layout)
         .repeated()
         .collect()
 }
