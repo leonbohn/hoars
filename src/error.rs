@@ -137,6 +137,115 @@ impl Display for ValidationError {
     }
 }
 
+/// Why a label expression could not be converted to a BDD, see
+/// [`crate::AbstractLabelExpression::try_into_bdd`].
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum LabelError {
+    /// The expression uses an atomic proposition that the variable set does not have.
+    ApOutOfRange {
+        /// The offending atomic proposition.
+        ap: u16,
+        /// The number of variables in the BDD variable set.
+        count: u16,
+    },
+    /// The expression contains an alias reference (`@name`) that was not substituted;
+    /// call [`crate::HoaRepresentation::unalias`] before converting.
+    UnresolvedAlias(String),
+}
+
+impl Display for LabelError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ApOutOfRange { ap, count } => {
+                write!(
+                    f,
+                    "AP identifier {ap} is too high, the set has {count} variables"
+                )
+            }
+            Self::UnresolvedAlias(name) => write!(
+                f,
+                "alias @{name} is not resolved, call `HoaRepresentation::unalias` first"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LabelError {}
+
+/// An `@name` reference that [`crate::HoaRepresentation::unalias`] cannot substitute.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum AliasError {
+    /// There is no `Alias:` item for this name.
+    Undefined(String),
+    /// The name is part of a cycle, i.e. it is defined in terms of itself.
+    Cyclic(String),
+}
+
+impl Display for AliasError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Undefined(name) => write!(f, "alias @{name} is not defined"),
+            Self::Cyclic(name) => write!(f, "alias @{name} is defined in terms of itself"),
+        }
+    }
+}
+
+impl std::error::Error for AliasError {}
+
+/// A violation found by [`crate::HoaRepresentation::verify`].
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum VerifyError {
+    /// The body defines this state more than once.
+    DuplicateState(Id),
+    /// `States:` disagrees with the number of states in the body.
+    StateCountMismatch {
+        /// The number stated in the header.
+        declared: usize,
+        /// The number of states in the body.
+        actual: usize,
+    },
+}
+
+impl Display for VerifyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DuplicateState(state) => write!(f, "state {state} is defined more than once"),
+            Self::StateCountMismatch { declared, actual } => {
+                write!(f, "`States:` says {declared} but the body defines {actual}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for VerifyError {}
+
+/// All violations found by [`crate::HoaRepresentation::verify`], in the order found.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct VerifyErrors(Vec<VerifyError>);
+
+impl VerifyErrors {
+    pub(crate) fn new(errors: Vec<VerifyError>) -> Self {
+        Self(errors)
+    }
+}
+
+impl std::ops::Deref for VerifyErrors {
+    type Target = [VerifyError];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Display for VerifyErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let messages: Vec<_> = self.0.iter().map(ToString::to_string).collect();
+        write!(f, "{}", messages.join("; "))
+    }
+}
+
+impl std::error::Error for VerifyErrors {}
+
 impl Display for FromHoaError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -208,5 +317,32 @@ mod tests {
         let boxed: Result<HoaRepresentation, Box<dyn std::error::Error>> =
             (|| Ok(HoaRepresentation::try_from(src)?))();
         assert!(boxed.is_err());
+    }
+
+    #[test]
+    fn conversion_errors_are_std_errors() {
+        let boxed = |e: Box<dyn std::error::Error>| e.to_string();
+        assert!(
+            boxed(Box::new(crate::LabelError::ApOutOfRange {
+                ap: 2,
+                count: 1
+            }))
+            .contains("AP identifier 2")
+        );
+        assert!(
+            boxed(Box::new(crate::AliasError::Undefined("a".into()))).contains("@a is not defined")
+        );
+        assert!(boxed(Box::new(crate::VerifyError::DuplicateState(1))).contains("state 1"));
+        let errors = crate::VerifyErrors::new(vec![
+            crate::VerifyError::DuplicateState(1),
+            crate::VerifyError::StateCountMismatch {
+                declared: 2,
+                actual: 1,
+            },
+        ]);
+        assert_eq!(
+            boxed(Box::new(errors)).as_str(),
+            "state 1 is defined more than once; `States:` says 2 but the body defines 1"
+        );
     }
 }

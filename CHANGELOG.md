@@ -5,6 +5,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** label conversion returns the new `LabelError` instead of a `String`: `AbstractLabelExpression::try_into_bdd`, `AbstractLabelExpression::try_into_prop` and `LabelExpression::try_into_hoa_expression`. It tells an out-of-range AP (`LabelError::ApOutOfRange { ap, count }`) from an unresolved alias (`LabelError::UnresolvedAlias(name)`) and implements `std::error::Error` (issue 6).
+- **Breaking:** `HoaRepresentation::unalias` returns the new `AliasError` (`Undefined`, `Cyclic`) and `HoaRepresentation::verify` returns `VerifyErrors`, a list of `VerifyError` (`DuplicateState`, `StateCountMismatch`), instead of `String`. Both implement `std::error::Error`, and `VerifyErrors` derefs to `[VerifyError]` (issue 6).
+
 ## [0.4.0] - 2026-11-06
 
 ### Added

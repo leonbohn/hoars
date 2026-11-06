@@ -1,6 +1,8 @@
 use biodivine_lib_bdd::{Bdd, BddVariable, BddVariableSet};
 use std::ops::Deref;
 
+use crate::{AliasError, LabelError};
+
 /// Newtype wrapper around a [`crate::LabelExpression`], implements [`Deref`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Label(pub LabelExpression);
@@ -36,7 +38,7 @@ impl AbstractLabelExpression {
     ///
     /// The variable for AP `i` is `BddVariable::from_index(i)`, so `vs` must have at
     /// least as many variables as the largest AP identifier used in this expression.
-    pub fn try_into_bdd(&self, vs: &BddVariableSet) -> Result<Bdd, String> {
+    pub fn try_into_bdd(&self, vs: &BddVariableSet) -> Result<Bdd, LabelError> {
         match self {
             AbstractLabelExpression::Boolean(b) => Ok(match b {
                 true => vs.mk_true(),
@@ -46,12 +48,13 @@ impl AbstractLabelExpression {
                 if *i < vs.num_vars() {
                     Ok(vs.mk_var(BddVariable::from_index(*i as usize)))
                 } else {
-                    Err(format!("AP identifier {i} is too high"))
+                    Err(LabelError::ApOutOfRange {
+                        ap: *i,
+                        count: vs.num_vars(),
+                    })
                 }
             }
-            AbstractLabelExpression::Alias(name) => Err(format!(
-                "alias @{name} is not resolved, call `HoaRepresentation::unalias` first"
-            )),
+            AbstractLabelExpression::Alias(name) => Err(LabelError::UnresolvedAlias(name.clone())),
             AbstractLabelExpression::Negated(e) => Ok(e.try_into_bdd(vs)?.not()),
             AbstractLabelExpression::Conjunction(cs) => cs
                 .iter()
@@ -80,7 +83,7 @@ impl AbstractLabelExpression {
         &self,
         defs: &std::collections::HashMap<String, AbstractLabelExpression>,
         stack: &mut Vec<String>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, AliasError> {
         let many = |es: &[Self], stack: &mut Vec<String>| {
             es.iter()
                 .map(|e| e.substitute(defs, stack))
@@ -89,11 +92,9 @@ impl AbstractLabelExpression {
         Ok(match self {
             Self::Alias(name) => {
                 if stack.contains(name) {
-                    return Err(format!("alias @{name} is defined in terms of itself"));
+                    return Err(AliasError::Cyclic(name.clone()));
                 }
-                let def = defs
-                    .get(name)
-                    .ok_or(format!("alias @{name} is not defined"))?;
+                let def = defs.get(name).ok_or(AliasError::Undefined(name.clone()))?;
                 stack.push(name.clone());
                 let out = def.substitute(defs, stack);
                 stack.pop();
@@ -107,7 +108,7 @@ impl AbstractLabelExpression {
     }
 
     /// Converts this expression into a [`Bdd`] over `num_aps` anonymous variables.
-    pub fn try_into_prop(&self, num_aps: u16) -> Result<HoaExpression, String> {
+    pub fn try_into_prop(&self, num_aps: u16) -> Result<HoaExpression, LabelError> {
         let var_set = BddVariableSet::new_anonymous(num_aps);
         self.try_into_bdd(&var_set)
     }
@@ -134,7 +135,7 @@ pub enum LabelExpression {
 
 impl LabelExpression {
     /// Converts the expression into a BDD over `num_aps` variables.
-    pub fn try_into_hoa_expression(self, num_aps: u16) -> Result<HoaExpression, String> {
+    pub fn try_into_hoa_expression(self, num_aps: u16) -> Result<HoaExpression, LabelError> {
         match self {
             LabelExpression::Expression(b) => Ok(b),
             LabelExpression::Abstract(b) => b.try_into_prop(num_aps),
@@ -260,7 +261,25 @@ mod tests {
     #[test]
     fn out_of_bounds_ap_is_an_error() {
         let expr = Conjunction(vec![Integer(0), not(int(7))]);
-        assert!(expr.try_into_prop(2).is_err());
-        assert!(Integer(7).try_into_prop(2).is_err());
+        let expected = LabelError::ApOutOfRange { ap: 7, count: 2 };
+        assert_eq!(expr.try_into_prop(2), Err(expected.clone()));
+        assert_eq!(Integer(7).try_into_prop(2), Err(expected.clone()));
+        assert_eq!(
+            LabelExpression::Abstract(Integer(7)).try_into_hoa_expression(2),
+            Err(expected)
+        );
+    }
+
+    #[test]
+    fn unresolved_alias_is_an_error() {
+        let expr = AbstractLabelExpression::Alias("x".into());
+        assert_eq!(
+            expr.try_into_prop(2),
+            Err(LabelError::UnresolvedAlias("x".into()))
+        );
+        assert_eq!(
+            expr.try_into_prop(2).unwrap_err().to_string(),
+            "alias @x is not resolved, call `HoaRepresentation::unalias` first"
+        );
     }
 }
