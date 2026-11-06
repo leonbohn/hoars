@@ -5,12 +5,29 @@ use chumsky::{input::ValueInput, prelude::*};
 /// Byte span in the input.
 pub type Span = SimpleSpan;
 
-/// Error type of all parsers: `Rich` errors over tokens.
-pub type Err<'a> = extra::Err<Rich<'a, Token<'a>, Span>>;
-
 /// Input of the token parsers: a stream of `Token`s with their `Span`s.
 pub trait TokInput<'a>: ValueInput<'a, Token = Token<'a>, Span = Span> {}
 impl<'a, I> TokInput<'a> for I where I: ValueInput<'a, Token = Token<'a>, Span = Span> {}
+
+/// Error types the token parsers can run with: `EmptyErr` (fast, no information) for the
+/// first attempt and `Rich` to produce diagnostics when that attempt failed.
+pub trait HoaErr<'a, I: TokInput<'a>>:
+    'a
+    + chumsky::error::Error<'a, I>
+    + chumsky::error::LabelError<'a, I, chumsky::util::MaybeRef<'a, Token<'a>>>
+{
+    fn custom(span: Span, msg: String) -> Self;
+}
+impl<'a, I: TokInput<'a>> HoaErr<'a, I> for chumsky::error::EmptyErr {
+    fn custom(_: Span, _: String) -> Self {
+        chumsky::error::EmptyErr::default()
+    }
+}
+impl<'a, I: TokInput<'a>> HoaErr<'a, I> for Rich<'a, Token<'a>, Span> {
+    fn custom(span: Span, msg: String) -> Self {
+        Rich::custom(span, msg)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Token<'a> {
@@ -125,17 +142,9 @@ pub fn tokenizer<'a>() -> impl Parser<'a, &'a str, Vec<(Token<'a>, Span)>, extra
 
     // first characters of the alternatives are disjoint except for header, version, ident
     // (tried in that order), so the cheap single-character tokens come first
-    let token = op
-        .or(paren)
-        .or(int)
-        .or(abort)
-        .or(end_)
-        .or(body)
-        .or(header)
-        .or(version)
-        .or(str_)
-        .or(alias)
-        .or(ident);
+    let token = choice((
+        op, paren, int, abort, end_, body, header, version, str_, alias, ident,
+    ));
 
     // comments nest: `/*a/*b*/c*/` is a single comment
     let comment = recursive(|comment| {

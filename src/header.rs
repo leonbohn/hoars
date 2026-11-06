@@ -6,7 +6,7 @@ use crate::{
     AbstractLabelExpression, AcceptanceCondition, AcceptanceInfo, AcceptanceName, AliasName, Id,
     Property, Token,
     format::{AtomicProposition, StateConjunction},
-    lexer::{Err, TokInput},
+    lexer::{HoaErr, TokInput},
     value,
 };
 
@@ -85,7 +85,7 @@ impl HeaderItem {
     }
 }
 
-fn item<'a, I: TokInput<'a>>() -> impl Parser<'a, I, HeaderItem, Err<'a>> {
+fn item<'a, I: TokInput<'a>, X: HoaErr<'a, I>>() -> impl Parser<'a, I, HeaderItem, extra::Err<X>> {
     let states = just(Token::Header("States"))
         .ignore_then(value::integer())
         .map(HeaderItem::States);
@@ -111,7 +111,7 @@ fn item<'a, I: TokInput<'a>>() -> impl Parser<'a, I, HeaderItem, Err<'a>> {
             if (num as usize) == prop_labels.len() {
                 Ok(HeaderItem::AP(prop_labels))
             } else {
-                Err(Rich::custom(
+                Err(X::custom(
                     span,
                     format!("Expected {} aps but got {}", num, prop_labels.len()),
                 ))
@@ -211,7 +211,8 @@ impl<'a> IntoIterator for &'a Header {
 
 impl Header {
     /// Construts a new header parser.
-    pub fn parser<'a, I: TokInput<'a>>() -> impl Parser<'a, I, Self, Err<'a>> {
+    pub fn parser<'a, I: TokInput<'a>, X: HoaErr<'a, I>>() -> impl Parser<'a, I, Self, extra::Err<X>>
+    {
         let version = just(Token::Header("HOA"))
             .ignore_then(value::identifier())
             .map(HeaderItem::Version);
@@ -268,7 +269,7 @@ mod tests {
         let with_hoa = format!("HOA: v1\n{}", input);
         let tokens = crate::input::lex(&with_hoa).map_err(|e| e.to_string())?;
         let eoi = (with_hoa.len()..with_hoa.len()).into();
-        Header::parser()
+        Header::parser::<_, chumsky::error::Rich<crate::Token, crate::lexer::Span>>()
             .then_ignore(end())
             .parse(Stream::from_iter(tokens).map(eoi, |(t, s)| (t, s)))
             .into_result()

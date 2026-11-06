@@ -75,3 +75,24 @@ Trying to avoid the `Vec` per label conjunction/disjunction gained < 2 % and was
 Wall clock parse: 1k 5.9 ms (10.7 MiB/s), 10k 68 ms (10.0 MiB/s), **200k (15 MB) 1.77 s** (8.5 MiB/s), 6.0× faster
 than the 10.63 s baseline. Remaining: parsing is now about half of the time (the token `Vec`, `Rich` tracking in
 the token parsers, per-edge allocations).
+
+## Issue 11, step 3: cheap errors first, `choice` for the token alternatives
+
+- All token parsers are generic over the error type (`HoaErr`). `from_hoa` parses with `EmptyErr` first and
+  only re-parses with `Rich` if that fails, so diagnostics are unchanged. (Parse stage on the 2000-state probe:
+  64M → 47M instructions.)
+- The lexer's `.or` chain became `choice((...))`: no measurable effect (+1 %, within what reordering costs), kept for
+  readability as chumsky's docs recommend.
+- `EmptyErr` instead of `Cheap` in the lexer would save another ~4 % but needs a second lexing pass for the error
+  position; not done.
+
+| Benchmark | Instructions | vs. baseline |
+|---|---:|---:|
+| parse_generated 250 | 13,464,754 | −87.0 % (7.7×) |
+| parse_generated 1000 | 54,215,079 | −86.9 % (7.6×) |
+| parse_generated 4000 | 213,403,011 | −87.1 % (7.8×) |
+| parse_fixtures ltl | 31,136,007 | −87.5 % (8.0×) |
+| parse_fixtures synthetic | 42,292,980 | −87.2 % (7.8×) |
+| parse_fixtures spot | 150,453,265 | −87.5 % (8.0×) |
+
+Wall clock parse: 1k 5.1 ms (12.4 MiB/s), 10k 54.9 ms, **200k (15 MB) 1.51 s** (10.0 MiB/s), 7.1× faster than 10.63 s.

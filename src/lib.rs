@@ -175,7 +175,8 @@ impl HoaRepresentation {
     }
 
     /// Parses a HOA automaton from a string.
-    pub fn parser<'a, I: lexer::TokInput<'a>>() -> impl Parser<'a, I, Self, lexer::Err<'a>> {
+    pub fn parser<'a, I: lexer::TokInput<'a>, X: lexer::HoaErr<'a, I>>()
+    -> impl Parser<'a, I, Self, chumsky::extra::Err<X>> {
         Header::parser()
             .then(Body::parser())
             .then_ignore(end())
@@ -188,12 +189,12 @@ impl HoaRepresentation {
                     })
                     .unwrap_or(0);
                 let num_aps = u16::try_from(num_aps)
-                    .map_err(|_| Rich::custom(span, "too many atomic propositions"))?;
+                    .map_err(|_| X::custom(span, "too many atomic propositions".to_string()))?;
                 let states = raw_states
                     .into_iter()
                     .map(|s| s.resolve(num_aps))
                     .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| Rich::custom(span, e))?;
+                    .map_err(|e| X::custom(span, e))?;
                 Ok(HoaRepresentation::from_parts(header, states.into()))
             })
     }

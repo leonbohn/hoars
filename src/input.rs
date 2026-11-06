@@ -42,13 +42,25 @@ pub(crate) fn parse_tokens<'a>(
     tokens: Vec<(Token<'a>, lexer::Span)>,
 ) -> Result<HoaRepresentation, FromHoaError> {
     let start = std::time::Instant::now();
-    let eoi = (input.len()..input.len()).into();
-    let out = HoaRepresentation::parser()
-        .parse(Stream::from_iter(tokens).map(eoi, |(t, s)| (t, s)))
+    let eoi: lexer::Span = (input.len()..input.len()).into();
+    let stream = || Stream::from_iter(tokens.iter().cloned()).map(eoi, |(t, s)| (t, s));
+    // First attempt without error tracking (much faster); only if it fails, parse again with
+    // `Rich` errors to produce the diagnostics.
+    let out = match HoaRepresentation::parser::<_, chumsky::error::EmptyErr>()
+        .parse(stream())
         .into_result()
-        .map_err(|errors| build_error_report(input, errors))
-        .map_err(FromHoaError::ParserError)
-        .and_then(|aut| aut.validate().map(|()| aut));
+    {
+        Ok(aut) => aut.validate().map(|()| aut),
+        Err(_) => Err(FromHoaError::ParserError(
+            match HoaRepresentation::parser::<_, chumsky::error::Rich<Token, lexer::Span>>()
+                .parse(stream())
+                .into_result()
+            {
+                Err(errors) => build_error_report(input, errors),
+                Ok(_) => "parsing failed".to_string(),
+            },
+        )),
+    };
     tracing::info!("Actual parsing took {}µs", start.elapsed().as_micros());
     out
 }

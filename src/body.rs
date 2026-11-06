@@ -5,7 +5,7 @@ use chumsky::prelude::*;
 use crate::{
     AbstractLabelExpression, AcceptanceSignature, AtomicProposition, Id, Label, LabelExpression,
     StateConjunction,
-    lexer::{Err, TokInput, Token},
+    lexer::{HoaErr, TokInput, Token},
     value,
 };
 
@@ -185,7 +185,8 @@ fn implicit_label(i: usize, num_aps: u16) -> Label {
     }))
 }
 
-pub fn label<'a, I: TokInput<'a>>() -> impl Parser<'a, I, Label, Err<'a>> + Clone {
+pub fn label<'a, I: TokInput<'a>, X: HoaErr<'a, I>>()
+-> impl Parser<'a, I, Label, extra::Err<X>> + Clone {
     just(Token::Paren('['))
         .ignore_then(value::label_expression())
         .then_ignore(just(Token::Paren(']')))
@@ -193,7 +194,7 @@ pub fn label<'a, I: TokInput<'a>>() -> impl Parser<'a, I, Label, Err<'a>> + Clon
         .map(Label)
 }
 
-fn edge<'a, I: TokInput<'a>>() -> impl Parser<'a, I, RawEdge, Err<'a>> {
+fn edge<'a, I: TokInput<'a>, X: HoaErr<'a, I>>() -> impl Parser<'a, I, RawEdge, extra::Err<X>> {
     label()
         .or_not()
         .then(value::state_conjunction())
@@ -203,7 +204,8 @@ fn edge<'a, I: TokInput<'a>>() -> impl Parser<'a, I, RawEdge, Err<'a>> {
         })
 }
 
-pub(crate) fn state<'a, I: TokInput<'a>>() -> impl Parser<'a, I, RawState, Err<'a>> {
+pub(crate) fn state<'a, I: TokInput<'a>, X: HoaErr<'a, I>>()
+-> impl Parser<'a, I, RawState, extra::Err<X>> {
     just(Token::Header("State"))
         .ignore_then(
             label()
@@ -242,7 +244,8 @@ impl Body {
         Self(Vec::new())
     }
 
-    pub(crate) fn parser<'a, I: TokInput<'a>>() -> impl Parser<'a, I, Vec<RawState>, Err<'a>> {
+    pub(crate) fn parser<'a, I: TokInput<'a>, X: HoaErr<'a, I>>()
+    -> impl Parser<'a, I, Vec<RawState>, extra::Err<X>> {
         just(Token::BodyStart)
             .ignore_then(state().repeated().collect())
             .then_ignore(just(Token::BodyEnd))
@@ -291,7 +294,7 @@ mod tests {
 
         let tokens = crate::input::lex(input).map_err(|e| tracing::error!("{e}"))?;
         let eoi = (input.len()..input.len()).into();
-        let ast = Body::parser()
+        let ast = Body::parser::<_, chumsky::error::Rich<crate::Token, crate::lexer::Span>>()
             .then_ignore(end())
             .parse(Stream::from_iter(tokens).map(eoi, |(t, s)| (t, s)))
             .into_result()
