@@ -154,9 +154,12 @@ impl RawState {
                     (None, None) => AcceptanceSignature(Vec::new()),
                     (Some(acc), None) => acc.clone(),
                     (None, Some(acc)) => acc,
-                    (Some(left), Some(right)) => AcceptanceSignature(
-                        left.iter().cloned().chain(right.iter().cloned()).collect(),
-                    ),
+                    (Some(left), Some(right)) => {
+                        let mut merged = Vec::with_capacity(left.len() + right.len());
+                        merged.extend_from_slice(left);
+                        merged.extend_from_slice(&right);
+                        AcceptanceSignature(merged)
+                    }
                 };
                 Edge(label, conj, acc)
             })

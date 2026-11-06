@@ -34,18 +34,15 @@ pub fn from_hoa(value: &str) -> Result<HoaRepresentation, FromHoaError> {
 
 /// Parses exactly one automaton from `input` (text, comments and whitespace included).
 pub(crate) fn parse_str(input: &str) -> Result<HoaRepresentation, FromHoaError> {
-    let start = std::time::Instant::now();
     // First attempt without error tracking (much faster); only if it fails, look closer to
     // produce the diagnostics.
-    let out = match HoaRepresentation::parser::<chumsky::error::EmptyErr>()
+    match HoaRepresentation::parser::<chumsky::error::EmptyErr>()
         .parse(input)
         .into_result()
     {
         Ok(aut) => aut.validate().map(|()| aut),
         Err(_) => Err(diagnose(input)),
-    };
-    tracing::info!("Parsing took {}µs", start.elapsed().as_micros());
-    out
+    }
 }
 
 /// The error for an `input` that failed to parse: a lexical error, an abort, or the parse error.

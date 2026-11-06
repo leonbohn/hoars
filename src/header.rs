@@ -223,9 +223,9 @@ impl Header {
     }
 
     /// Returns the version of the format.
-    pub fn get_version(&self) -> Option<String> {
+    pub fn get_version(&self) -> Option<&str> {
         self.iter().find_map(|item| match item {
-            HeaderItem::Version(version) => Some(version.clone()),
+            HeaderItem::Version(version) => Some(version.as_str()),
             _ => None,
         })
     }

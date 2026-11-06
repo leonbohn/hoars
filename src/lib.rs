@@ -153,7 +153,10 @@ impl HoaRepresentation {
 
     /// Returns the version of the HOA file.
     pub fn version(&self) -> String {
-        self.header.get_version().expect("Version must be set!")
+        self.header
+            .get_version()
+            .expect("Version must be set!")
+            .to_string()
     }
 
     /// Returns the header of the HOA file.
@@ -385,13 +388,17 @@ impl HoaRepresentation {
 
     /// Returns the aliases of the automaton.
     pub fn aliases(&self) -> Vec<(AliasName, AbstractLabelExpression)> {
-        self.header()
-            .iter()
-            .filter_map(|item| match item {
-                HeaderItem::Alias(name, expr) => Some((name.clone(), expr.clone())),
-                _ => None,
-            })
+        self.alias_iter()
+            .map(|(name, expr)| (name.clone(), expr.clone()))
             .collect()
+    }
+
+    /// Iterates over the `Alias:` header items without cloning them.
+    pub fn alias_iter(&self) -> impl Iterator<Item = (&AliasName, &AbstractLabelExpression)> {
+        self.header().iter().filter_map(|item| match item {
+            HeaderItem::Alias(name, expr) => Some((name, expr)),
+            _ => None,
+        })
     }
 
     /// Replaces all alias references (`@name`) in the aliases and in the edge labels by
@@ -401,9 +408,8 @@ impl HoaRepresentation {
     /// Parsing does not unalias, so call this before converting labels to BDDs.
     pub fn unalias(&mut self) -> Result<(), String> {
         let raw: std::collections::HashMap<_, _> = self
-            .aliases()
-            .into_iter()
-            .map(|(name, expr)| (name.0, expr))
+            .alias_iter()
+            .map(|(name, expr)| (name.0.clone(), expr.clone()))
             .collect();
         let defs = raw
             .iter()

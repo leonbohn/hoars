@@ -125,3 +125,21 @@ Wall clock `verify`: 1k 36.7 µs → 1.1 µs, 10k 2.77 ms → 11.6 µs, **200k 1
 Instruction counts of `verify` (250 / 1000 / 4000): 0.57M / 3.19M / 9.20M (before 0.84M / 3.77M / 21.3M). They include
 dropping the automaton that the benchmark function takes by value, which now dominates and is why they do not shrink
 as much as the time; the `validate` numbers moved (−24 % to ±0) with the parser's allocation pattern, its code is unchanged.
+
+## Issue 13: small fixes
+
+`aliases()` keeps its signature but is built on the new borrowing `alias_iter()`; `unalias` uses the latter.
+`Header::get_version` returns `Option<&str>` (breaking). State and transition acceptance are merged with one
+exactly-sized allocation. The per-parse `Instant::now()` / `tracing::info!` calls are gone. (`aps()` already returned a
+slice.) Instruction counts do not move for parse/verify (±0.1 %, noise); `write` is 1.4–6.4 % lower than the
+baseline above (first `write` run since the parser changes; the writer itself was not touched).
+
+## Final state (all of P2), against the baseline at the top
+
+| | Baseline | Now |
+|---|---:|---:|
+| parse, 200k states / 15 MB | 10.63 s | 0.547 s (19.4×) |
+| verify, 200k states | 1.141 s | 0.4 ms |
+| write, 200k states | 240 ms | not re-measured |
+| parse_generated 1000 (instructions) | 412,824,152 | 19,056,307 (21.7×) |
+| parse_fixtures spot | 1,205,177,431 | 49,909,429 (24.1×) |
