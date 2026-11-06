@@ -115,3 +115,13 @@ The fast attempt still uses `EmptyErr`; `Rich<char>` is only used for the re-par
 
 Wall clock parse: 1k 1.83 ms (34.6 MiB/s), 10k 20.6 ms, **200k (15 MB) 0.547 s** (27.6 MiB/s), **19.4× faster**
 than the 10.63 s baseline: the ≥ 10× goal of issue 11 is met.
+
+## Issue 12: `verify()` without `Vec::contains`
+
+Ids are collected, sorted (`sort_unstable`) and checked for equal neighbours; the body is not assumed to be sorted.
+`validate()` already checked the ranges of start states and edge targets and is unchanged.
+
+Wall clock `verify`: 1k 36.7 µs → 1.1 µs, 10k 2.77 ms → 11.6 µs, **200k 1.141 s → 0.4 ms** (goal: < 50 ms).
+Instruction counts of `verify` (250 / 1000 / 4000): 0.57M / 3.19M / 9.20M (before 0.84M / 3.77M / 21.3M). They include
+dropping the automaton that the benchmark function takes by value, which now dominates and is why they do not shrink
+as much as the time; the `validate` numbers moved (−24 % to ±0) with the parser's allocation pattern, its code is unchanged.

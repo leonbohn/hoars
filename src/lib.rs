@@ -213,12 +213,13 @@ impl HoaRepresentation {
     /// - all states are defined exactly once
     pub fn verify(&self) -> Result<(), String> {
         let mut errors = Vec::new();
-        let mut states = Vec::new();
-        for state in self.body().iter() {
-            if states.contains(&state.id()) {
-                errors.push(format!("State {} is defined more than once!", state.id()));
+        // `body_mut`/`add_state` can leave the body unsorted, so sort the ids instead of relying on it
+        let mut states: Vec<_> = self.body().iter().map(|s| s.id()).collect();
+        states.sort_unstable();
+        for pair in states.windows(2) {
+            if pair[0] == pair[1] {
+                errors.push(format!("State {} is defined more than once!", pair[0]));
             }
-            states.push(state.id());
         }
         if let Some(num_states) = self.num_states()
             && states.len() != num_states
@@ -997,6 +998,20 @@ State: 0
             None
         );
         assert_eq!(super::first_automaton_split_position("HOA: v1\n"), None);
+    }
+
+    #[test]
+    fn verify_reports_duplicate_states_even_if_unsorted() {
+        let mut aut = HoaRepresentation::try_from(
+            "HOA: v1\nStates: 3\nAcceptance: 0 t\n--BODY--\nState: 0\nState: 1\nState: 2\n--END--",
+        )
+        .unwrap();
+        assert_eq!(Ok(()), aut.verify());
+        let dup = aut.body()[0].clone();
+        aut.body_mut().insert(0, dup);
+        aut.body_mut().swap(0, 3);
+        let err = aut.verify().unwrap_err();
+        assert!(err.contains("State 0 is defined more than once!"), "{err}");
     }
 
     #[test]
