@@ -1,16 +1,11 @@
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 
 use chumsky::prelude::*;
 
 use crate::{
-    AbstractLabelExpression, AcceptanceSignature, AtomicProposition, Id, Label, LabelExpression,
-    StateConjunction,
+    AbstractLabelExpression, AcceptanceSignature, Id, Label, LabelExpression, StateConjunction,
     value::{self, HoaErr, sym, tok},
 };
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[allow(unused)]
-pub struct Alphabet(pub Vec<AtomicProposition>);
 
 /// A state as parsed, before implicit labels and state labels are resolved.
 #[derive(Clone, Debug)]
@@ -62,6 +57,22 @@ impl Edge {
         self.1.get_singleton()
     }
 
+    /// The acceptance sets the edge belongs to, including those of `state` (its source),
+    /// sorted and without duplicates. Use this to treat state-based and transition-based
+    /// acceptance alike.
+    pub fn effective_acceptance(&self, state: &State) -> AcceptanceSignature {
+        let mut sets: Vec<Id> = state
+            .acceptance()
+            .into_iter()
+            .flat_map(|a| a.iter())
+            .chain(self.2.iter())
+            .copied()
+            .collect();
+        sets.sort_unstable();
+        sets.dedup();
+        AcceptanceSignature(sets)
+    }
+
     /// Builds an edge from its parts.
     pub fn from_parts(
         label_expression: Label,
@@ -73,18 +84,31 @@ impl Edge {
 }
 
 /// Represents a state in a HOA automaton. It contains the [`Id`] of the state, an optional
-/// comment and a list of outgoing edges.
+/// comment, an optional state acceptance signature (`State: 0 {1}`) and a list of outgoing
+/// edges. State acceptance is not merged into the edges, see [`Edge::effective_acceptance`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct State(
     pub(crate) Id,
     pub(crate) Option<String>,
     pub(crate) Vec<Edge>,
+    pub(crate) Option<AcceptanceSignature>,
 );
 
 impl State {
     /// Constructs a new state from its parts.
     pub fn from_parts(id: Id, comment: Option<String>, edges: Vec<Edge>) -> Self {
-        Self(id, comment, edges)
+        Self(id, comment, edges, None)
+    }
+
+    /// Sets the state acceptance signature, i.e. the `{..}` on the `State:` line.
+    pub fn with_acceptance(mut self, acceptance: Option<AcceptanceSignature>) -> Self {
+        self.3 = acceptance;
+        self
+    }
+
+    /// The acceptance signature given on the `State:` line, if any.
+    pub fn acceptance(&self) -> Option<&AcceptanceSignature> {
+        self.3.as_ref()
     }
 
     /// Extracts the id of the state.
@@ -150,21 +174,11 @@ impl RawState {
                     (None, Some(l)) => l.clone(),
                     (None, None) => implicit_label(i, num_aps),
                 };
-                let acc = match (&state_acc, acc) {
-                    (None, None) => AcceptanceSignature(Vec::new()),
-                    (Some(acc), None) => acc.clone(),
-                    (None, Some(acc)) => acc,
-                    (Some(left), Some(right)) => {
-                        let mut merged = Vec::with_capacity(left.len() + right.len());
-                        merged.extend_from_slice(left);
-                        merged.extend_from_slice(&right);
-                        AcceptanceSignature(merged)
-                    }
-                };
+                let acc = acc.unwrap_or(AcceptanceSignature(Vec::new()));
                 Edge(label, conj, acc)
             })
             .collect();
-        Ok(State(id, comment, out_edges))
+        Ok(State(id, comment, out_edges, state_acc))
     }
 }
 
@@ -244,6 +258,24 @@ impl Body {
         Self(Vec::new())
     }
 
+    /// Adds a state, keeping the states sorted by id. A state whose id is already present
+    /// is placed after the existing one, [`crate::HoaRepresentation::verify`] reports it.
+    pub fn push(&mut self, state: State) {
+        let at = self.0.partition_point(|s| s.id() <= state.id());
+        self.0.insert(at, state);
+    }
+
+    /// Returns the (first) state with the given id.
+    pub fn state(&self, id: Id) -> Option<&State> {
+        let at = self.0.partition_point(|s| s.id() < id);
+        self.0.get(at).filter(|s| s.id() == id)
+    }
+
+    /// Iterates mutably over the states, which are sorted by id and keep their ids.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut State> {
+        self.0.iter_mut()
+    }
+
     pub(crate) fn parser<'a, X: HoaErr<'a>>()
     -> impl Parser<'a, &'a str, Vec<RawState>, extra::Err<X>> {
         tok("--BODY--")
@@ -253,22 +285,18 @@ impl Body {
 }
 
 impl From<Vec<State>> for Body {
-    fn from(value: Vec<State>) -> Self {
+    /// Sorts the states by id (stable, so repeated ids keep their order).
+    fn from(mut value: Vec<State>) -> Self {
+        value.sort_by_key(State::id);
         Body(value)
     }
 }
 
 impl Deref for Body {
-    type Target = Vec<State>;
+    type Target = [State];
 
     fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-
-impl DerefMut for Body {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 
@@ -286,14 +314,18 @@ mod tests {
 
     #[cfg(test)]
     pub fn process_body(input: &str) -> Result<Vec<State>, ()> {
-        use crate::{body::Body, print_error_report};
+        use crate::body::Body;
 
         let ast = crate::value::ws()
             .ignore_then(Body::parser::<chumsky::error::Rich<char, crate::value::Span>>())
             .then_ignore(end())
             .parse(input)
             .into_result()
-            .map_err(|errors| print_error_report(input, errors))?;
+            .map_err(|errors| {
+                for e in &errors {
+                    tracing::error!("{}", crate::Diagnostic::from_rich(e));
+                }
+            })?;
         // the tests only use explicit labels, so the AP count does not matter
         ast.into_iter()
             .map(|s| s.resolve(0).map_err(|_| ()))

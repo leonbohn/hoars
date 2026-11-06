@@ -1,6 +1,6 @@
 use chumsky::Parser;
 
-use crate::{FromHoaError, HoaRepresentation, Token, build_error_report, lexer};
+use crate::{Diagnostic, FromHoaError, HoaRepresentation, Token, lexer};
 
 /// Lexes `input` into tokens with their (byte) spans. The parser itself does not use the
 /// tokens, only [`crate::parse_hoa_automata`] and [`crate::first_automaton_split_position`] do,
@@ -10,24 +10,28 @@ pub(crate) fn lex(input: &str) -> Result<Vec<(Token<'_>, lexer::Span)>, FromHoaE
         .parse(input)
         .into_result()
         .map_err(|errors| {
-            build_error_report::<char>(
-                input,
-                errors.into_iter().map(|e| {
-                    let found = input[e.span().start..].chars().next();
-                    chumsky::error::Rich::custom(
-                        *e.span(),
-                        match found {
-                            Some(c) => format!("unexpected character {c:?}"),
-                            None => "unexpected end of input".to_string(),
-                        },
-                    )
-                }),
+            FromHoaError::LexerError(
+                errors
+                    .into_iter()
+                    .map(|e| {
+                        let found = input[e.span().start..].chars().next();
+                        Diagnostic {
+                            span: e.span().into_range(),
+                            message: match found {
+                                Some(c) => format!("unexpected character {c:?}"),
+                                None => "unexpected end of input".to_string(),
+                            },
+                            expected: Vec::new(),
+                            found: found.map(String::from),
+                        }
+                    })
+                    .collect(),
             )
-        })
-        .map_err(FromHoaError::LexerError)?;
+        })?;
     Ok(tokens)
 }
 
+/// Parses exactly one automaton from `value`, see also [`crate::parse_hoa_automata`].
 pub fn from_hoa(value: &str) -> Result<HoaRepresentation, FromHoaError> {
     parse_str(value)
 }
@@ -40,7 +44,7 @@ pub(crate) fn parse_str(input: &str) -> Result<HoaRepresentation, FromHoaError> 
         .parse(input)
         .into_result()
     {
-        Ok(aut) => aut.validate().map(|()| aut),
+        Ok(aut) => aut.and_then(|aut| aut.validate().map(|()| aut)),
         Err(_) => Err(diagnose(input)),
     }
 }
@@ -55,8 +59,13 @@ fn diagnose(input: &str) -> FromHoaError {
                 .parse(input)
                 .into_result()
             {
-                Err(errors) => build_error_report(input, errors),
-                Ok(_) => "parsing failed".to_string(),
+                Err(errors) => errors.iter().map(Diagnostic::from_rich).collect(),
+                Ok(_) => vec![Diagnostic {
+                    span: 0..input.len(),
+                    message: "parsing failed".to_string(),
+                    expected: Vec::new(),
+                    found: None,
+                }],
             },
         ),
     }

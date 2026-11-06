@@ -1,8 +1,4 @@
-use std::{
-    borrow::Borrow,
-    fmt::Display,
-    ops::{Deref, Rem},
-};
+use std::{borrow::Borrow, fmt::Display, ops::Deref};
 
 use crate::Id;
 
@@ -120,28 +116,29 @@ impl AcceptanceCondition {
     }
 
     fn parity_rec(current: u32, total: u32) -> Self {
-        if current + 1 >= total {
-            if current.rem(2) == 0 {
-                AcceptanceCondition::id_inf(current)
-            } else {
-                AcceptanceCondition::id_fin(current)
-            }
-        } else if current.rem(2) == 0 {
-            AcceptanceCondition::Or(
-                Box::new(AcceptanceCondition::Inf(AcceptanceAtom::Positive(current))),
-                Box::new(Self::parity_rec(current + 1, total)),
-            )
+        let this = if current.is_multiple_of(2) {
+            Self::id_inf(current)
         } else {
-            AcceptanceCondition::And(
-                Box::new(AcceptanceCondition::Fin(AcceptanceAtom::Positive(current))),
-                Box::new(Self::parity_rec(current + 1, total)),
-            )
+            Self::id_fin(current)
+        };
+        if current + 1 >= total {
+            this
+        } else if current.is_multiple_of(2) {
+            this.or(Self::parity_rec(current + 1, total))
+        } else {
+            this.and(Self::parity_rec(current + 1, total))
         }
     }
 
-    /// Creates a parity acceptance condition with the given number of priorities.
+    /// Creates a "min even" parity acceptance condition with the given number of priorities
+    /// (acceptance sets `0..priorities`): the lowest set seen infinitely often must be even.
+    /// For `n = 3` this is `Inf(0) | (Fin(1) & Inf(2))`. Zero priorities give `f`, as no run
+    /// can see any set.
     pub fn parity(priorities: u32) -> Self {
-        Self::parity_rec(0, priorities)
+        match priorities {
+            0 => Self::Boolean(HoaBool(false)),
+            n => Self::parity_rec(0, n),
+        }
     }
 
     /// Creates a Buchi acceptance condition.
@@ -159,17 +156,12 @@ impl AcceptanceCondition {
         AcceptanceCondition::Or(Box::new(self.clone()), Box::new(other.borrow().clone()))
     }
 
-    /// Creates an acceptance condition containing the given atom.
-    pub fn atom<A: Borrow<AcceptanceAtom>>(atom: A) -> Self {
-        AcceptanceCondition::Fin(atom.borrow().clone())
-    }
-
-    /// Creates an acceptance condition consisting of a positive atodm.
+    /// Creates an acceptance condition `Fin(id)`: set `id` is seen finitely often.
     pub fn id_fin(id: Id) -> Self {
         Self::Fin(AcceptanceAtom::Positive(id))
     }
 
-    /// Creates an acceptance condition consisting of a negative atom.
+    /// Creates an acceptance condition `Inf(id)`: set `id` is seen infinitely often.
     pub fn id_inf(id: Id) -> Self {
         Self::Inf(AcceptanceAtom::Positive(id))
     }
@@ -226,6 +218,7 @@ pub enum AcceptanceName {
 }
 
 impl AcceptanceName {
+    /// Whether this is the `parity` acceptance name.
     pub fn is_parity(&self) -> bool {
         matches!(self, AcceptanceName::Parity)
     }
@@ -344,6 +337,19 @@ mod tests {
             parity_condition,
             AcceptanceCondition::id_inf(0)
                 .or(AcceptanceCondition::id_fin(1).and(AcceptanceCondition::id_inf(2)))
+        );
+    }
+
+    #[test]
+    fn parity_conditions() {
+        assert_eq!(
+            AcceptanceCondition::parity(0),
+            AcceptanceCondition::Boolean(crate::HoaBool(false))
+        );
+        assert_eq!(AcceptanceCondition::parity(1).to_string(), "Inf(0)");
+        assert_eq!(
+            AcceptanceCondition::parity(4).to_string(),
+            "(Inf(0) | (Fin(1) & (Inf(2) | Fin(3))))"
         );
     }
 }
