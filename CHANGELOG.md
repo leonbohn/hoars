@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking:** `AcceptanceCondition::atom` (which built `Fin(atom)`) is removed; use `id_fin`/`id_inf`. `AcceptanceCondition::parity(0)` is now `f` instead of `Inf(0)`; `parity` is documented as "min even" and its helpers' docs are fixed.
+
 - **Breaking:** `Header` is a validated struct instead of a `Vec<HeaderItem>` behind `Deref`/`DerefMut`. Items that may appear once are fields (`version`, `states`, `aps`, `acceptance`, `acceptance_name_info`, `tool`, `name`), repeatable ones are collected (`start`, `aliases`, `properties`, `unknown`), and the accessors are field reads. Build one with `Header::new`, `Header::from_items` or `Header::push`, which reject repeated single items with `ValidationError::DuplicateHeader` (and a missing version with the new `ValidationError::MissingVersion`); `Header::items` lists the items again. The order of the input is not kept: the writer uses a fixed order, unknown items go last, and several `properties:` lines are joined. `Header::from_vec` and the `Vec` methods are gone, `HoaRepresentation::add_header_item` returns a `Result`, `Header::parser` and `HoaRepresentation::parser` yield `Result`s.
 - **Breaking:** `Body` derefs to `[State]` only (no `DerefMut`) and stays sorted by state id: `From<Vec<State>>` sorts, `Body::push` inserts at the right place, `Body::state(id)` looks a state up by binary search, `Body::iter_mut` gives mutable states. `HoaRepresentation::from_parts` no longer sorts on its own.
 
