@@ -5,8 +5,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-06
+
 ### Added
 
+- Fuzz targets (`fuzz/`, `cargo fuzz run parse|roundtrip|split`), test fixtures in `hoa/spec/` (spec examples) and `hoa/spot/` (Spot output), and a test that parses, round-trips and converts every fixture.
+- `rust-version = "1.88"` and an MSRV job in CI.
 - `HoaRepresentation::validate`, run by the parser, with the new `FromHoaError::Invalid(ValidationError)`. It rejects a missing `Acceptance:`, repeated `States:`/`AP:`/`acc-name:`/`tool:`/`name:`/`Acceptance:` items, and acceptance sets, states and APs beyond the declared counts. Unsupported versions now give `FromHoaError::UnsupportedVersion`; `v1` and `v1.x` are accepted (the lexer accepts dotted versions such as `v1.1`).
 - Implicit edge labels and state labels. A state without label whose edges have none needs exactly `2^|AP|` edges (edge `i` gets the label where AP `j` holds iff bit `j` of `i` is set); a state label is copied onto each of its outgoing edges; mixing labelled and unlabelled edges is a parse error. Implicit and state-labelled automata parse to the same `HoaRepresentation` as their explicit equivalents.
 - Alias references (`@name`) in label expressions: `AbstractLabelExpression::Alias(String)`. `HoaRepresentation::unalias` substitutes them recursively in the aliases and in all edge labels and reports undefined or cyclic aliases. Parsing does not unalias; BDD conversion of an unresolved alias returns an error.
@@ -39,6 +43,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Unclosed nested `/*` comments made the lexer take exponential time (found by fuzzing); comments are now skipped in linear time.
+- Alias names that start with a digit (`@0`, as emitted by Spot) are accepted.
 - Integers that do not fit the target type (e.g. `States: 99999999999`) are reported as parse errors instead of panicking, and an AP identifier that does not fit a `u16` is no longer silently truncated.
 - The writer (`output::to_hoa`) now produces HOA that parses back to the same automaton:
   - labels print as `[<expr>]` with precedence-aware parentheses (a disjunction inside a conjunction, a non-atom inside a negation), instead of the Rust `Debug` representation;
