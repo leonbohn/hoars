@@ -43,7 +43,7 @@ pub(crate) fn parse_str(input: &str) -> Result<HoaRepresentation, FromHoaError> 
         .parse(input)
         .into_result()
     {
-        Ok(aut) => aut.validate().map(|()| aut),
+        Ok(aut) => aut.and_then(|aut| aut.validate().map(|()| aut)),
         Err(_) => Err(diagnose(input)),
     }
 }

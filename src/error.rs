@@ -89,6 +89,8 @@ pub enum FromHoaError {
 /// A violation of the HOA format found by [`crate::HoaRepresentation::validate`].
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ValidationError {
+    /// The header does not start with the version (`HOA:`).
+    MissingVersion,
     /// There is no `Acceptance:` header item.
     MissingAcceptance,
     /// A header item that may appear at most once appears several times.
@@ -119,6 +121,7 @@ pub enum ValidationError {
 impl Display for ValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::MissingVersion => write!(f, "missing `HOA:` version"),
             Self::MissingAcceptance => write!(f, "missing `Acceptance:` header item"),
             Self::DuplicateHeader(name) => write!(f, "`{name}:` appears more than once"),
             Self::AcceptanceSetOutOfRange { set, count } => {

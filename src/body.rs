@@ -1,4 +1,4 @@
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 
 use chumsky::prelude::*;
 
@@ -263,6 +263,24 @@ impl Body {
         Self(Vec::new())
     }
 
+    /// Adds a state, keeping the states sorted by id. A state whose id is already present
+    /// is placed after the existing one, [`crate::HoaRepresentation::verify`] reports it.
+    pub fn push(&mut self, state: State) {
+        let at = self.0.partition_point(|s| s.id() <= state.id());
+        self.0.insert(at, state);
+    }
+
+    /// Returns the (first) state with the given id.
+    pub fn state(&self, id: Id) -> Option<&State> {
+        let at = self.0.partition_point(|s| s.id() < id);
+        self.0.get(at).filter(|s| s.id() == id)
+    }
+
+    /// Iterates mutably over the states, which are sorted by id and keep their ids.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut State> {
+        self.0.iter_mut()
+    }
+
     pub(crate) fn parser<'a, X: HoaErr<'a>>()
     -> impl Parser<'a, &'a str, Vec<RawState>, extra::Err<X>> {
         tok("--BODY--")
@@ -272,22 +290,18 @@ impl Body {
 }
 
 impl From<Vec<State>> for Body {
-    fn from(value: Vec<State>) -> Self {
+    /// Sorts the states by id (stable, so repeated ids keep their order).
+    fn from(mut value: Vec<State>) -> Self {
+        value.sort_by_key(State::id);
         Body(value)
     }
 }
 
 impl Deref for Body {
-    type Target = Vec<State>;
+    type Target = [State];
 
     fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-
-impl DerefMut for Body {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 

@@ -42,7 +42,8 @@ fn bdd_to_expression(bdd: &Bdd) -> String {
 
 pub fn to_hoa(aut: &HoaRepresentation) -> String {
     aut.header()
-        .into_iter()
+        .items()
+        .iter()
         .map(|header_item| header_item.to_string())
         .chain(std::iter::once("--BODY--".to_string()))
         .chain(aut.body().into_iter().map(|state| state.to_string()))
