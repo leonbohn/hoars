@@ -578,6 +578,16 @@ State: 0
     }
 
     #[test]
+    fn unclosed_nested_comments_are_linear_time() {
+        // found by fuzzing: backtracking over unclosed `/*` was exponential
+        let input = "/*/*\"\"/*#{//*/*/".repeat(200);
+        let start = std::time::Instant::now();
+        assert!(HoaRepresentation::try_from(input.as_str()).is_err());
+        assert!(super::parse_hoa_automata(&input).is_empty());
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[test]
     fn abort_inside_string_is_not_an_abort() {
         let hoa = MINIMAL.replace("v1", "v1\nname: \"--ABORT-- --END--\"");
         assert!(HoaRepresentation::try_from(hoa.as_str()).is_ok());
