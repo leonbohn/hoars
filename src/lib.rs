@@ -1,32 +1,29 @@
 //! This crate provides a parser for the HOA format.
-// #![warn(missing_docs)]
+#![warn(missing_docs)]
 mod body;
 mod error;
 mod format;
 mod header;
+/// Entry points for parsing HOA text.
 pub mod input;
 mod lexer;
+/// Writing HOA, see [`output::to_hoa`].
 pub mod output;
 mod value;
 
+/// Label expressions on edges and aliases.
 pub mod label;
-pub use label::{
-    AbstractLabelExpression, HoaAlphabet, HoaExpression, HoaRepr, HoaSymbol, Label,
-    LabelExpression, MAX_APS,
-};
+#[allow(deprecated)]
+pub use label::MAX_APS;
+pub use label::{AbstractLabelExpression, HoaExpression, Label, LabelExpression};
 
 use tracing::warn;
 
 use std::fmt::Debug;
 
-#[allow(unused_imports)]
-use chumsky::prelude::*;
-pub use format::*;
+use chumsky::{Parser, prelude::end};
 
-use chumsky::Parser;
-pub use format::{
-    AcceptanceCondition, AcceptanceInfo, AcceptanceName, AcceptanceSignature, AliasName, Property,
-};
+pub use format::*;
 
 pub use body::{Body, Edge, State};
 pub use error::{Diagnostic, FromHoaError, ValidationError};
@@ -71,6 +68,7 @@ impl HoaRepresentation {
         &self.header
     }
 
+    /// Gives mutable access to the header.
     pub fn header_mut(&mut self) -> &mut Header {
         &mut self.header
     }
@@ -80,6 +78,7 @@ impl HoaRepresentation {
         &self.body
     }
 
+    /// Gives mutable access to the body.
     pub fn body_mut(&mut self) -> &mut Body {
         &mut self.body
     }

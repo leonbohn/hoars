@@ -13,15 +13,21 @@ impl Deref for Label {
     }
 }
 
+/// A label expression as written in the file, over atomic propositions given by index.
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum AbstractLabelExpression {
+    /// `t` or `f`.
     Boolean(bool),
+    /// The atomic proposition with this index.
     Integer(u16),
     /// A reference to an alias (`@name`, stored without the `@`); see
     /// [`crate::HoaRepresentation::unalias`].
     Alias(String),
+    /// Negation of an expression.
     Negated(Box<AbstractLabelExpression>),
+    /// Conjunction (`&`), true when empty.
     Conjunction(Vec<AbstractLabelExpression>),
+    /// Disjunction (`|`), false when empty.
     Disjunction(Vec<AbstractLabelExpression>),
 }
 
@@ -107,31 +113,27 @@ impl AbstractLabelExpression {
     }
 }
 
-pub const MAX_APS: u8 = 6;
-pub type HoaRepr = u8;
-/// Typedef for an alphabet used by a [`crate::HoaRepresentation`].
-#[allow(unused)]
-pub struct HoaAlphabet(Vec<String>);
+/// The number of variables the `AnonymousAbstract` helpers build their BDDs over.
+const ANONYMOUS_APS: u8 = 6;
 
-impl FromIterator<String> for HoaAlphabet {
-    fn from_iter<T: IntoIterator<Item = String>>(iter: T) -> Self {
-        Self(iter.into_iter().collect())
-    }
-}
+/// Only used by test helpers in this crate, not meaningful for users.
+#[deprecated(since = "0.3.0", note = "an internal constant, define your own limit")]
+pub const MAX_APS: u8 = ANONYMOUS_APS;
 
 /// Typedef for an expression used by a [`crate::HoaRepresentation`].
 pub type HoaExpression = Bdd;
 
-/// Typedef for a symbol used by a [`crate::HoaRepresentation`].
-pub type HoaSymbol = Vec<HoaRepr>;
-
+/// The expression of a [`Label`]: either as parsed or already converted to a BDD.
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum LabelExpression {
+    /// A BDD over the atomic propositions.
     Expression(HoaExpression),
+    /// An expression as parsed.
     Abstract(AbstractLabelExpression),
 }
 
 impl LabelExpression {
+    /// Converts the expression into a BDD over `num_aps` variables.
     pub fn try_into_hoa_expression(self, num_aps: u16) -> Result<HoaExpression, String> {
         match self {
             LabelExpression::Expression(b) => Ok(b),
@@ -159,11 +161,11 @@ use AbstractLabelExpression::*;
 #[allow(dead_code)]
 impl Anonymous<false> {
     pub fn var_expr(n: u16) -> LabelExpression {
-        assert!(n < MAX_APS as u16);
+        assert!(n < ANONYMOUS_APS as u16);
         LabelExpression::Abstract(AbstractLabelExpression::Integer(n))
     }
     pub fn not_var_expr(n: u16) -> LabelExpression {
-        assert!(n < MAX_APS as u16);
+        assert!(n < ANONYMOUS_APS as u16);
         LabelExpression::Abstract(Negated(Box::new(Integer(n))))
     }
     pub fn top_label() -> Label {
@@ -172,11 +174,11 @@ impl Anonymous<false> {
         )))
     }
     pub fn var_label(n: u16) -> Label {
-        assert!(n < MAX_APS as u16);
+        assert!(n < ANONYMOUS_APS as u16);
         Label(Self::var_expr(n))
     }
     pub fn not_var_label(n: u16) -> Label {
-        assert!(n < MAX_APS as u16);
+        assert!(n < ANONYMOUS_APS as u16);
         Label(Self::not_var_expr(n))
     }
 }
@@ -186,23 +188,23 @@ impl Anonymous<false> {
 #[allow(dead_code)]
 impl Anonymous<true> {
     pub fn var_expr(n: usize) -> LabelExpression {
-        assert!(n < MAX_APS as usize);
+        assert!(n < ANONYMOUS_APS as usize);
         LabelExpression::Expression(Self::var(n))
     }
     pub fn var_label(n: usize) -> Label {
-        assert!(n < MAX_APS as usize);
+        assert!(n < ANONYMOUS_APS as usize);
         Label(Self::var_expr(n))
     }
     pub fn var(n: usize) -> Bdd {
-        assert!(n < MAX_APS as usize);
-        BddVariableSet::new_anonymous(MAX_APS as u16).mk_var(BddVariable::from_index(n))
+        assert!(n < ANONYMOUS_APS as usize);
+        BddVariableSet::new_anonymous(ANONYMOUS_APS as u16).mk_var(BddVariable::from_index(n))
     }
     pub fn not_var(n: usize) -> Bdd {
-        assert!(n < MAX_APS as usize);
-        BddVariableSet::new_anonymous(MAX_APS as u16).mk_not_var(BddVariable::from_index(n))
+        assert!(n < ANONYMOUS_APS as usize);
+        BddVariableSet::new_anonymous(ANONYMOUS_APS as u16).mk_not_var(BddVariable::from_index(n))
     }
     pub fn top() -> Bdd {
-        BddVariableSet::new_anonymous(MAX_APS as u16).mk_true()
+        BddVariableSet::new_anonymous(ANONYMOUS_APS as u16).mk_true()
     }
     pub fn top_expr() -> LabelExpression {
         LabelExpression::Expression(Self::top())

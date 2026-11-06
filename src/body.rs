@@ -3,14 +3,9 @@ use std::ops::Deref;
 use chumsky::prelude::*;
 
 use crate::{
-    AbstractLabelExpression, AcceptanceSignature, AtomicProposition, Id, Label, LabelExpression,
-    StateConjunction,
+    AbstractLabelExpression, AcceptanceSignature, Id, Label, LabelExpression, StateConjunction,
     value::{self, HoaErr, sym, tok},
 };
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[allow(unused)]
-pub struct Alphabet(pub Vec<AtomicProposition>);
 
 /// A state as parsed, before implicit labels and state labels are resolved.
 #[derive(Clone, Debug)]

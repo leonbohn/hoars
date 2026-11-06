@@ -40,6 +40,7 @@ fn bdd_to_expression(bdd: &Bdd) -> String {
         .join(" | ")
 }
 
+/// Writes `aut` as HOA text, which parses back to an equal automaton.
 pub fn to_hoa(aut: &HoaRepresentation) -> String {
     aut.header()
         .items()

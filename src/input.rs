@@ -31,6 +31,7 @@ pub(crate) fn lex(input: &str) -> Result<Vec<(Token<'_>, lexer::Span)>, FromHoaE
     Ok(tokens)
 }
 
+/// Parses exactly one automaton from `value`, see also [`crate::parse_hoa_automata`].
 pub fn from_hoa(value: &str) -> Result<HoaRepresentation, FromHoaError> {
     parse_str(value)
 }

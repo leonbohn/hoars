@@ -4,7 +4,7 @@ use crate::{
     AbstractLabelExpression, AcceptanceCondition, AcceptanceInfo, AcceptanceName, AliasName, Id,
     Property, ValidationError,
     format::{AtomicProposition, StateConjunction},
-    value::{self, HoaErr, sym, tok},
+    value::{self, HoaErr, tok},
 };
 
 /// Represents a header item in a HOA file, for more information on each
@@ -50,6 +50,7 @@ pub enum UnknownValue {
 }
 
 impl HeaderItem {
+    /// The number of states if this is a `States:` item.
     pub fn count_states(&self) -> Option<usize> {
         if let HeaderItem::States(i) = self {
             Some(*i as usize)
@@ -58,6 +59,7 @@ impl HeaderItem {
         }
     }
 
+    /// The name and parameters if this is an `acc-name:` item.
     pub fn try_acceptance_name(&self) -> Option<(&AcceptanceName, &[AcceptanceInfo])> {
         if let HeaderItem::AcceptanceName(x, y) = self {
             Some((x, y))
@@ -66,6 +68,7 @@ impl HeaderItem {
         }
     }
 
+    /// The number of acceptance sets if this is an `Acceptance:` item.
     pub fn count_acceptance_sets(&self) -> Option<usize> {
         if let HeaderItem::Acceptance(n, _) = self {
             Some(*n as usize)
@@ -94,8 +97,8 @@ fn item<'a, X: HoaErr<'a>>() -> impl Parser<'a, &'a str, HeaderItem, extra::Err<
         .map(|(name, info)| HeaderItem::AcceptanceName(name, info));
 
     let start = tok("Start:")
-        .ignore_then(value::integer().separated_by(sym('&')).collect())
-        .map(|conjunction| HeaderItem::Start(StateConjunction(conjunction)));
+        .ignore_then(value::state_conjunction())
+        .map(HeaderItem::Start);
 
     let aps = tok("AP:")
         .ignore_then(value::integer())
@@ -417,6 +420,11 @@ mod tests {
     use tracing::error;
 
     use super::*;
+
+    #[test]
+    fn start_needs_a_state() {
+        assert_fails("Start:");
+    }
 
     #[test]
     fn header_is_validated_and_canonical() {

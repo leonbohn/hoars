@@ -218,6 +218,7 @@ pub enum AcceptanceName {
 }
 
 impl AcceptanceName {
+    /// Whether this is the `parity` acceptance name.
     pub fn is_parity(&self) -> bool {
         matches!(self, AcceptanceName::Parity)
     }
