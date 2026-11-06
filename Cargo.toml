@@ -9,6 +9,7 @@ keywords = ["omega-automata", "hoa", "automata"]
 categories = ["encoding", "parser-implementations"]
 license = "MIT"
 edition = "2024"
+rust-version = "1.88"
 authors = ["León Bohn <bohn@lics.rwth-aachen.de>"]
 exclude = ["fuzz", "hoa/*", "doc/hoaf.pdf", ".github", "scripts", "CLAUDE.md", "PLAN.md"]
 

@@ -27,6 +27,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 
 ## Known sharp edges
 
+- MSRV is 1.88 (`rust-version`; `biodivine-lib-bdd` needs it), checked in CI for the library only.
 - Parsers use `chumsky` 0.9 (`Simple<Token>` errors), flagged with `allow(clippy::result_large_err)` in several places.
 - 51 unit tests, including one that parses, round-trips and converts every fixture in `hoa/` (`hoa/spec/` holds the spec examples, `hoa/spot/` real Spot output); no fuzzing.
 - Version `0.3.0` is the first release since crates.io `0.2.0` (breaking: `biodivine-lib-bdd` 0.6).
