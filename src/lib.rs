@@ -26,7 +26,9 @@ use chumsky::{Parser, prelude::end};
 pub use format::*;
 
 pub use body::{Body, Edge, State};
-pub use error::{Diagnostic, FromHoaError, ValidationError};
+pub use error::{
+    AliasError, Diagnostic, FromHoaError, LabelError, ValidationError, VerifyError, VerifyErrors,
+};
 pub use header::{Header, HeaderItem, UnknownValue};
 
 use itertools::Itertools;
@@ -116,29 +118,28 @@ impl HoaRepresentation {
     /// Verifies that the automaton is well-formed. This means that
     /// - the number of states is set correctly
     /// - all states are defined exactly once
-    pub fn verify(&self) -> Result<(), String> {
+    pub fn verify(&self) -> Result<(), VerifyErrors> {
+        use VerifyError::*;
         let mut errors = Vec::new();
         // `body_mut`/`add_state` can leave the body unsorted, so sort the ids instead of relying on it
         let mut states: Vec<_> = self.body().iter().map(|s| s.id()).collect();
         states.sort_unstable();
         for pair in states.windows(2) {
             if pair[0] == pair[1] {
-                errors.push(format!("State {} is defined more than once!", pair[0]));
+                errors.push(DuplicateState(pair[0]));
             }
         }
         if let Some(num_states) = self.num_states()
             && states.len() != num_states
         {
-            errors.push(format!(
-                "The number of states is set to {} but there are {} states!",
-                num_states,
-                states.len()
-            ));
+            errors.push(StateCountMismatch {
+                declared: num_states,
+                actual: states.len(),
+            });
         }
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors.join("\n"))
+        match errors.is_empty() {
+            true => Ok(()),
+            false => Err(VerifyErrors::new(errors)),
         }
     }
 
@@ -266,20 +267,21 @@ impl HoaRepresentation {
     /// cyclic aliases; on error the automaton is left unchanged.
     ///
     /// Parsing does not unalias, so call this before converting labels to BDDs.
-    pub fn unalias(&mut self) -> Result<(), String> {
+    pub fn unalias(&mut self) -> Result<(), AliasError> {
         let raw: std::collections::HashMap<_, _> = self
             .alias_iter()
             .map(|(name, expr)| (name.0.clone(), expr.clone()))
             .collect();
-        let defs = raw
-            .iter()
+        // walk the aliases in file order so that a reported cycle does not depend on map order
+        let defs = self
+            .alias_iter()
             .map(|(name, expr)| {
                 Ok((
-                    name.clone(),
-                    expr.substitute(&raw, &mut vec![name.clone()])?,
+                    name.0.clone(),
+                    expr.substitute(&raw, &mut vec![name.0.clone()])?,
                 ))
             })
-            .collect::<Result<std::collections::HashMap<_, _>, String>>()?;
+            .collect::<Result<std::collections::HashMap<_, _>, AliasError>>()?;
         let mut body = self.body.clone();
         for edge in body.iter_mut().flat_map(|s| s.edges_mut()) {
             if let LabelExpression::Abstract(expr) = &edge.label().0 {
@@ -498,7 +500,10 @@ State: 0
         let crate::LabelExpression::Abstract(l) = &before.body()[0].edges()[0].label().0 else {
             panic!()
         };
-        assert!(l.try_into_bdd(&vs).is_err());
+        assert_eq!(
+            l.try_into_bdd(&vs),
+            Err(crate::LabelError::UnresolvedAlias("y".into()))
+        );
     }
 
     #[test]
@@ -506,12 +511,19 @@ State: 0
         let undefined = ALIASED.replace("[@x & !0]", "[@z]");
         let mut aut = HoaRepresentation::try_from(undefined.as_str()).unwrap();
         let before = aut.clone();
-        assert!(aut.unalias().unwrap_err().contains("@z is not defined"));
+        assert_eq!(
+            aut.unalias().unwrap_err(),
+            crate::AliasError::Undefined("z".into())
+        );
         assert_eq!(aut, before);
 
         let cyclic = ALIASED.replace("Alias: @x 0 & 1", "Alias: @x @y");
         let mut aut = HoaRepresentation::try_from(cyclic.as_str()).unwrap();
-        assert!(aut.unalias().unwrap_err().contains("itself"));
+        // the first alias in file order closes the cycle
+        assert_eq!(
+            aut.unalias().unwrap_err(),
+            crate::AliasError::Cyclic("x".into())
+        );
     }
 
     fn with_body(body: &str) -> String {
@@ -820,7 +832,26 @@ State: 0
         aut.add_state(dup);
         assert!(aut.body().windows(2).all(|w| w[0].id() <= w[1].id()));
         let err = aut.verify().unwrap_err();
-        assert!(err.contains("State 0 is defined more than once!"), "{err}");
+        assert_eq!(
+            err.to_string(),
+            "state 0 is defined more than once; `States:` says 3 but the body defines 4"
+        );
+        assert_eq!(err[0], crate::VerifyError::DuplicateState(0));
+    }
+
+    #[test]
+    fn verify_reports_state_count_mismatch() {
+        let aut = HoaRepresentation::try_from(
+            "HOA: v1\nStates: 3\nAcceptance: 0 t\n--BODY--\nState: 0\n--END--",
+        )
+        .unwrap();
+        assert_eq!(
+            aut.verify().unwrap_err().to_vec(),
+            vec![crate::VerifyError::StateCountMismatch {
+                declared: 3,
+                actual: 1
+            }]
+        );
     }
 
     /// Every file in `hoa/` (not the benchmarks) parses, round-trips and converts to BDDs.
