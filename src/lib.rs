@@ -225,6 +225,9 @@ impl HoaRepresentation {
         }
         for state in self.body.iter() {
             check_state(state.id())?;
+            if let Some(acc) = state.acceptance() {
+                acc.0.iter().copied().try_for_each(check_set)?;
+            }
             for edge in state.edges() {
                 edge.state_conjunction()
                     .0
@@ -912,15 +915,16 @@ State: 0
                 Edge::from_parts(
                     AnonymousAbstract::var_label(0),
                     StateConjunction(vec![1]),
-                    AcceptanceSignature(vec![0]),
+                    AcceptanceSignature(vec![]),
                 ),
                 Edge::from_parts(
                     AnonymousAbstract::not_var_label(0),
                     StateConjunction(vec![2]),
-                    AcceptanceSignature(vec![0]),
+                    AcceptanceSignature(vec![]),
                 ),
             ],
-        );
+        )
+        .with_acceptance(Some(AcceptanceSignature(vec![0])));
         let q1 = State::from_parts(
             1,
             None,

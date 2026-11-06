@@ -62,6 +62,22 @@ impl Edge {
         self.1.get_singleton()
     }
 
+    /// The acceptance sets the edge belongs to, including those of `state` (its source),
+    /// sorted and without duplicates. Use this to treat state-based and transition-based
+    /// acceptance alike.
+    pub fn effective_acceptance(&self, state: &State) -> AcceptanceSignature {
+        let mut sets: Vec<Id> = state
+            .acceptance()
+            .into_iter()
+            .flat_map(|a| a.iter())
+            .chain(self.2.iter())
+            .copied()
+            .collect();
+        sets.sort_unstable();
+        sets.dedup();
+        AcceptanceSignature(sets)
+    }
+
     /// Builds an edge from its parts.
     pub fn from_parts(
         label_expression: Label,
@@ -73,18 +89,31 @@ impl Edge {
 }
 
 /// Represents a state in a HOA automaton. It contains the [`Id`] of the state, an optional
-/// comment and a list of outgoing edges.
+/// comment, an optional state acceptance signature (`State: 0 {1}`) and a list of outgoing
+/// edges. State acceptance is not merged into the edges, see [`Edge::effective_acceptance`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct State(
     pub(crate) Id,
     pub(crate) Option<String>,
     pub(crate) Vec<Edge>,
+    pub(crate) Option<AcceptanceSignature>,
 );
 
 impl State {
     /// Constructs a new state from its parts.
     pub fn from_parts(id: Id, comment: Option<String>, edges: Vec<Edge>) -> Self {
-        Self(id, comment, edges)
+        Self(id, comment, edges, None)
+    }
+
+    /// Sets the state acceptance signature, i.e. the `{..}` on the `State:` line.
+    pub fn with_acceptance(mut self, acceptance: Option<AcceptanceSignature>) -> Self {
+        self.3 = acceptance;
+        self
+    }
+
+    /// The acceptance signature given on the `State:` line, if any.
+    pub fn acceptance(&self) -> Option<&AcceptanceSignature> {
+        self.3.as_ref()
     }
 
     /// Extracts the id of the state.
@@ -150,21 +179,11 @@ impl RawState {
                     (None, Some(l)) => l.clone(),
                     (None, None) => implicit_label(i, num_aps),
                 };
-                let acc = match (&state_acc, acc) {
-                    (None, None) => AcceptanceSignature(Vec::new()),
-                    (Some(acc), None) => acc.clone(),
-                    (None, Some(acc)) => acc,
-                    (Some(left), Some(right)) => {
-                        let mut merged = Vec::with_capacity(left.len() + right.len());
-                        merged.extend_from_slice(left);
-                        merged.extend_from_slice(&right);
-                        AcceptanceSignature(merged)
-                    }
-                };
+                let acc = acc.unwrap_or(AcceptanceSignature(Vec::new()));
                 Edge(label, conj, acc)
             })
             .collect();
-        Ok(State(id, comment, out_edges))
+        Ok(State(id, comment, out_edges, state_acc))
     }
 }
 

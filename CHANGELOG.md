@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking:** state-based acceptance (`State: 0 {1}`) is no longer merged into the outgoing edges. `State` keeps it as `Option<AcceptanceSignature>` (`State::acceptance`, `State::with_acceptance`; `State::from_parts` is unchanged and sets none), `Edge::acceptance_signature` returns only the edge's own sets, and the writer prints the state signature back on the `State:` line. Use the new `Edge::effective_acceptance(&State)` (sorted, deduplicated) to get the merged view; consumers such as the `automata` `hoa` feature must switch to it.
+
 - **Breaking:** `FromHoaError` implements `std::error::Error` (as does `ValidationError`) and its `Display` output has no ANSI colour codes. `LexerError` and `ParserError` now hold `Vec<Diagnostic>` (byte span, message, expected, found) instead of a rendered report; `FromHoaError::render(src, color)` produces the ariadne report. The never-constructed variants `UnsupportedAcceptanceCondition`, `ParseAcceptanceCondition` and `UnsupportedBody` are removed.
 
 - Lexer: strings follow the spec's C-like syntax (`\"` and `\\` are decoded, other escapes are kept verbatim), comments nest, and `--ABORT--` lexes as `Token::Abort` (it used to be `Token::BodyEnd`). `Token::Bool` is gone; `t`/`f` are identifiers.

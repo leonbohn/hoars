@@ -230,6 +230,9 @@ impl Display for State {
         if let Some(comment) = &self.1 {
             write!(f, " {}", quote(comment))?;
         }
+        if let Some(acc) = &self.3 {
+            write!(f, " {{{}}}", acc.0.iter().join(" "))?;
+        }
         for edge in &self.2 {
             write!(f, "\n{}", edge)?;
         }
@@ -255,6 +258,21 @@ mod tests {
             "round trip changed the automaton:\n{printed}"
         );
         printed
+    }
+
+    #[test]
+    fn state_acceptance_is_kept_and_written_back() {
+        let text = "HOA: v1\nStates: 2\nStart: 0\nAP: 1 \"a\"\nAcceptance: 2 Inf(0) | Inf(1)\n--BODY--\nState: 0 \"c\" {1 0}\n[0] 1 {0}\n[!0] 0\nState: 1 {}\n[t] 0\n--END--";
+        let aut = parse(text);
+        let s0 = &aut.body()[0];
+        assert_eq!(s0.acceptance().unwrap().0, vec![1, 0]);
+        assert!(s0.edges()[1].acceptance_signature().is_empty());
+        assert_eq!(s0.edges()[0].effective_acceptance(s0).0, vec![0, 1]);
+        let printed = round_trip(&aut);
+        assert!(
+            printed.contains("State: 0 \"c\" {1 0}\n[0] 1 {0}\n[!0] 0\nState: 1 {}\n"),
+            "{printed}"
+        );
     }
 
     fn label(expr: AbstractLabelExpression) -> String {

@@ -1,7 +1,7 @@
 use std::fmt::{self, Display};
 use std::ops::Range;
 
-use crate::{HoaRepresentation, Id};
+use crate::Id;
 
 /// One lexer or parser error. The span refers to byte offsets into the parsed input; use
 /// [`FromHoaError::render`] to get a report with source snippets.
@@ -71,7 +71,7 @@ fn join(diagnostics: &[Diagnostic]) -> String {
         .join("; ")
 }
 
-/// Represents the different types of error that can be encountered when parsing a [`HoaRepresentation`].
+/// Represents the different types of error that can be encountered when parsing a [`crate::HoaRepresentation`].
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum FromHoaError {
     /// The version string does not match, we only support v1.
@@ -86,7 +86,7 @@ pub enum FromHoaError {
     Invalid(ValidationError),
 }
 
-/// A violation of the HOA format found by [`HoaRepresentation::validate`].
+/// A violation of the HOA format found by [`crate::HoaRepresentation::validate`].
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ValidationError {
     /// There is no `Acceptance:` header item.
