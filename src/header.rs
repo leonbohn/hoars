@@ -1,13 +1,12 @@
 use std::ops::{Deref, DerefMut};
 
-use chumsky::{prelude::*, select};
+use chumsky::prelude::*;
 
 use crate::{
     AbstractLabelExpression, AcceptanceCondition, AcceptanceInfo, AcceptanceName, AliasName, Id,
-    Property, Token,
+    Property,
     format::{AtomicProposition, StateConjunction},
-    lexer::{HoaErr, TokInput},
-    value,
+    value::{self, HoaErr, sym, tok},
 };
 
 /// Represents a header item in a HOA file, for more information on each
@@ -85,26 +84,22 @@ impl HeaderItem {
     }
 }
 
-fn item<'a, I: TokInput<'a>, X: HoaErr<'a, I>>() -> impl Parser<'a, I, HeaderItem, extra::Err<X>> {
-    let states = just(Token::Header("States"))
+fn item<'a, X: HoaErr<'a>>() -> impl Parser<'a, &'a str, HeaderItem, extra::Err<X>> {
+    let states = tok("States:")
         .ignore_then(value::integer())
         .map(HeaderItem::States);
 
-    let acceptance_name = just(Token::Header("acc-name"))
+    let acceptance_name = tok("acc-name:")
         .ignore_then(value::identifier())
         .map(AcceptanceName::from)
         .then(value::acceptance_info().repeated().collect::<Vec<_>>())
         .map(|(name, info)| HeaderItem::AcceptanceName(name, info));
 
-    let start = just(Token::Header("Start"))
-        .ignore_then(
-            value::integer()
-                .separated_by(just(Token::Op('&')))
-                .collect(),
-        )
+    let start = tok("Start:")
+        .ignore_then(value::integer().separated_by(sym('&')).collect())
         .map(|conjunction| HeaderItem::Start(StateConjunction(conjunction)));
 
-    let aps = just(Token::Header("AP"))
+    let aps = tok("AP:")
         .ignore_then(value::integer())
         .then(value::text().repeated().collect::<Vec<_>>())
         .try_map(|(num, prop_labels), span| {
@@ -118,26 +113,26 @@ fn item<'a, I: TokInput<'a>, X: HoaErr<'a, I>>() -> impl Parser<'a, I, HeaderIte
             }
         });
 
-    let acceptance = just(Token::Header("Acceptance"))
+    let acceptance = tok("Acceptance:")
         .ignore_then(value::integer())
         .then(value::acceptance_condition())
         .map(|(count, condition)| HeaderItem::Acceptance(count, condition));
 
-    let alias = just(Token::Header("Alias"))
+    let alias = tok("Alias:")
         .ignore_then(value::alias_name())
         .then(value::label_expression())
         .map(|(aname, expression)| HeaderItem::Alias(AliasName(aname), expression));
 
-    let name = just(Token::Header("name"))
+    let name = tok("name:")
         .ignore_then(value::text())
         .map(HeaderItem::Name);
 
-    let tool = just(Token::Header("tool"))
+    let tool = tok("tool:")
         .ignore_then(value::text())
         .then(value::text().or_not())
         .map(|(tool, version)| HeaderItem::Tool(tool, version));
 
-    let properties = just(Token::Header("properties"))
+    let properties = tok("properties:")
         .ignore_then(
             value::identifier()
                 .map(Property::from)
@@ -158,13 +153,15 @@ fn item<'a, I: TokInput<'a>, X: HoaErr<'a, I>>() -> impl Parser<'a, I, HeaderIte
         "tool",
         "name",
     ];
-    let unknown = select! { Token::Header(name) if !KNOWN.contains(&name) && name != "properties" => name.to_string() }
+    let unknown = value::header_name()
+        .filter(|name: &&str| !KNOWN.contains(name) && *name != "properties")
+        .map(str::to_string)
         .then(
-            select! {
-                Token::Int(i) => UnknownValue::Int(i.to_string()),
-                Token::Text(t) => UnknownValue::Text(t.into_owned()),
-                Token::Identifier(i) => UnknownValue::Identifier(i.to_string()),
-            }
+            choice((
+                value::int_text().map(|i: &str| UnknownValue::Int(i.to_string())),
+                value::text().map(UnknownValue::Text),
+                value::identifier().map(UnknownValue::Identifier),
+            ))
             .repeated()
             .collect::<Vec<_>>(),
         )
@@ -211,9 +208,8 @@ impl<'a> IntoIterator for &'a Header {
 
 impl Header {
     /// Construts a new header parser.
-    pub fn parser<'a, I: TokInput<'a>, X: HoaErr<'a, I>>() -> impl Parser<'a, I, Self, extra::Err<X>>
-    {
-        let version = just(Token::Header("HOA"))
+    pub fn parser<'a, X: HoaErr<'a>>() -> impl Parser<'a, &'a str, Self, extra::Err<X>> {
+        let version = tok("HOA:")
             .ignore_then(value::identifier())
             .map(HeaderItem::Version);
         version
@@ -262,16 +258,15 @@ impl DerefMut for Header {
 #[cfg(test)]
 mod tests {
     pub fn process_header(input: &str) -> Result<Vec<HeaderItem>, String> {
-        use chumsky::{input::Stream, prelude::Input};
-
         use crate::build_error_report;
 
         let with_hoa = format!("HOA: v1\n{}", input);
-        let tokens = crate::input::lex(&with_hoa).map_err(|e| e.to_string())?;
-        let eoi = (with_hoa.len()..with_hoa.len()).into();
-        Header::parser::<_, chumsky::error::Rich<crate::Token, crate::lexer::Span>>()
+        crate::value::ws()
+            .ignore_then(Header::parser::<
+                chumsky::error::Rich<char, crate::value::Span>,
+            >())
             .then_ignore(end())
-            .parse(Stream::from_iter(tokens).map(eoi, |(t, s)| (t, s)))
+            .parse(&with_hoa)
             .into_result()
             .map(|header| header.0)
             .map_err(|errors| build_error_report(&with_hoa, errors))

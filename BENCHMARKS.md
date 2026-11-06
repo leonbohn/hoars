@@ -96,3 +96,22 @@ the token parsers, per-edge allocations).
 | parse_fixtures spot | 150,453,265 | −87.5 % (8.0×) |
 
 Wall clock parse: 1k 5.1 ms (12.4 MiB/s), 10k 54.9 ms, **200k (15 MB) 1.51 s** (10.0 MiB/s), 7.1× faster than 10.63 s.
+
+## Issue 11, step 4: lexing and parsing fused
+
+The grammar now runs directly on `&str`: each token parser consumes the layout (whitespace, nested comments;
+a small `custom` parser) behind it, so there is no token `Vec` and no second pass. `lexer.rs` is only used to
+split files with several automata and to diagnose failures (lexical error, `--ABORT--`) after a failed parse.
+The fast attempt still uses `EmptyErr`; `Rich<char>` is only used for the re-parse that builds the report.
+
+| Benchmark | Instructions | vs. baseline |
+|---|---:|---:|
+| parse_generated 250 | 4,513,809 | −95.6 % (22.9×) |
+| parse_generated 1000 | 19,042,427 | −95.4 % (21.7×) |
+| parse_generated 4000 | 72,730,762 | −95.6 % (22.8×) |
+| parse_fixtures ltl | 9,225,060 | −96.3 % (26.9×) |
+| parse_fixtures synthetic | 13,364,209 | −95.9 % (24.6×) |
+| parse_fixtures spot | 49,883,774 | −95.9 % (24.2×) |
+
+Wall clock parse: 1k 1.83 ms (34.6 MiB/s), 10k 20.6 ms, **200k (15 MB) 0.547 s** (27.6 MiB/s), **19.4× faster**
+than the 10.63 s baseline: the ≥ 10× goal of issue 11 is met.

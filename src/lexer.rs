@@ -1,33 +1,9 @@
 use std::borrow::Cow;
 
-use chumsky::{input::ValueInput, prelude::*};
+use chumsky::prelude::*;
 
 /// Byte span in the input.
 pub type Span = SimpleSpan;
-
-/// Input of the token parsers: a stream of `Token`s with their `Span`s.
-pub trait TokInput<'a>: ValueInput<'a, Token = Token<'a>, Span = Span> {}
-impl<'a, I> TokInput<'a> for I where I: ValueInput<'a, Token = Token<'a>, Span = Span> {}
-
-/// Error types the token parsers can run with: `EmptyErr` (fast, no information) for the
-/// first attempt and `Rich` to produce diagnostics when that attempt failed.
-pub trait HoaErr<'a, I: TokInput<'a>>:
-    'a
-    + chumsky::error::Error<'a, I>
-    + chumsky::error::LabelError<'a, I, chumsky::util::MaybeRef<'a, Token<'a>>>
-{
-    fn custom(span: Span, msg: String) -> Self;
-}
-impl<'a, I: TokInput<'a>> HoaErr<'a, I> for chumsky::error::EmptyErr {
-    fn custom(_: Span, _: String) -> Self {
-        chumsky::error::EmptyErr::default()
-    }
-}
-impl<'a, I: TokInput<'a>> HoaErr<'a, I> for Rich<'a, Token<'a>, Span> {
-    fn custom(span: Span, msg: String) -> Self {
-        Rich::custom(span, msg)
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Token<'a> {

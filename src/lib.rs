@@ -175,9 +175,10 @@ impl HoaRepresentation {
     }
 
     /// Parses a HOA automaton from a string.
-    pub fn parser<'a, I: lexer::TokInput<'a>, X: lexer::HoaErr<'a, I>>()
-    -> impl Parser<'a, I, Self, chumsky::extra::Err<X>> {
-        Header::parser()
+    pub fn parser<'a, X: value::HoaErr<'a>>()
+    -> impl Parser<'a, &'a str, Self, chumsky::extra::Err<X>> {
+        value::ws()
+            .ignore_then(Header::parser())
             .then(Body::parser())
             .then_ignore(end())
             .try_map(|(header, raw_states), span| {
@@ -627,7 +628,9 @@ pub fn parse_hoa_automata(input: &str) -> Vec<HoaRepresentation> {
         if !chunk.iter().any(|(t, _)| *t == Token::BodyStart) {
             continue;
         }
-        match input::parse_tokens(input, chunk) {
+        // chunks are never empty; error reports refer to the text of the chunk
+        let text = &input[chunk[0].1.start..chunk[chunk.len() - 1].1.end];
+        match input::parse_str(text) {
             Ok(aut) => out.push(aut),
             Err(e) => warn!("Error when parsing automaton: {}", e),
         }

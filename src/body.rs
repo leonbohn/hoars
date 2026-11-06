@@ -5,8 +5,7 @@ use chumsky::prelude::*;
 use crate::{
     AbstractLabelExpression, AcceptanceSignature, AtomicProposition, Id, Label, LabelExpression,
     StateConjunction,
-    lexer::{HoaErr, TokInput, Token},
-    value,
+    value::{self, HoaErr, sym, tok},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -185,16 +184,15 @@ fn implicit_label(i: usize, num_aps: u16) -> Label {
     }))
 }
 
-pub fn label<'a, I: TokInput<'a>, X: HoaErr<'a, I>>()
--> impl Parser<'a, I, Label, extra::Err<X>> + Clone {
-    just(Token::Paren('['))
+pub fn label<'a, X: HoaErr<'a>>() -> impl Parser<'a, &'a str, Label, extra::Err<X>> + Clone {
+    sym('[')
         .ignore_then(value::label_expression())
-        .then_ignore(just(Token::Paren(']')))
+        .then_ignore(sym(']'))
         .map(LabelExpression::Abstract)
         .map(Label)
 }
 
-fn edge<'a, I: TokInput<'a>, X: HoaErr<'a, I>>() -> impl Parser<'a, I, RawEdge, extra::Err<X>> {
+fn edge<'a, X: HoaErr<'a>>() -> impl Parser<'a, &'a str, RawEdge, extra::Err<X>> {
     label()
         .or_not()
         .then(value::state_conjunction())
@@ -204,9 +202,8 @@ fn edge<'a, I: TokInput<'a>, X: HoaErr<'a, I>>() -> impl Parser<'a, I, RawEdge, 
         })
 }
 
-pub(crate) fn state<'a, I: TokInput<'a>, X: HoaErr<'a, I>>()
--> impl Parser<'a, I, RawState, extra::Err<X>> {
-    just(Token::Header("State"))
+pub(crate) fn state<'a, X: HoaErr<'a>>() -> impl Parser<'a, &'a str, RawState, extra::Err<X>> {
+    tok("State:")
         .ignore_then(
             label()
                 .or_not()
@@ -244,11 +241,11 @@ impl Body {
         Self(Vec::new())
     }
 
-    pub(crate) fn parser<'a, I: TokInput<'a>, X: HoaErr<'a, I>>()
-    -> impl Parser<'a, I, Vec<RawState>, extra::Err<X>> {
-        just(Token::BodyStart)
+    pub(crate) fn parser<'a, X: HoaErr<'a>>()
+    -> impl Parser<'a, &'a str, Vec<RawState>, extra::Err<X>> {
+        tok("--BODY--")
             .ignore_then(state().repeated().collect())
-            .then_ignore(just(Token::BodyEnd))
+            .then_ignore(tok("--END--"))
     }
 }
 
@@ -274,11 +271,7 @@ impl DerefMut for Body {
 
 #[cfg(test)]
 mod tests {
-    use chumsky::{
-        Parser,
-        input::Stream,
-        prelude::{Input, end},
-    };
+    use chumsky::{Parser, prelude::end};
 
     use crate::{AbstractLabelExpression, Edge, Label, StateConjunction, label::AnonymousAbstract};
 
@@ -292,11 +285,10 @@ mod tests {
     pub fn process_body(input: &str) -> Result<Vec<State>, ()> {
         use crate::{body::Body, print_error_report};
 
-        let tokens = crate::input::lex(input).map_err(|e| tracing::error!("{e}"))?;
-        let eoi = (input.len()..input.len()).into();
-        let ast = Body::parser::<_, chumsky::error::Rich<crate::Token, crate::lexer::Span>>()
+        let ast = crate::value::ws()
+            .ignore_then(Body::parser::<chumsky::error::Rich<char, crate::value::Span>>())
             .then_ignore(end())
-            .parse(Stream::from_iter(tokens).map(eoi, |(t, s)| (t, s)))
+            .parse(input)
             .into_result()
             .map_err(|errors| print_error_report(input, errors))?;
         // the tests only use explicit labels, so the AP count does not matter
