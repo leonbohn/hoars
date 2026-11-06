@@ -258,8 +258,6 @@ impl DerefMut for Header {
 #[cfg(test)]
 mod tests {
     pub fn process_header(input: &str) -> Result<Vec<HeaderItem>, String> {
-        use crate::build_error_report;
-
         let with_hoa = format!("HOA: v1\n{}", input);
         crate::value::ws()
             .ignore_then(Header::parser::<
@@ -269,7 +267,13 @@ mod tests {
             .parse(&with_hoa)
             .into_result()
             .map(|header| header.0)
-            .map_err(|errors| build_error_report(&with_hoa, errors))
+            .map_err(|errors| {
+                errors
+                    .iter()
+                    .map(|e| crate::Diagnostic::from_rich(e).to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
     }
 
     use tracing::error;

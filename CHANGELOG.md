@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking:** `FromHoaError` implements `std::error::Error` (as does `ValidationError`) and its `Display` output has no ANSI colour codes. `LexerError` and `ParserError` now hold `Vec<Diagnostic>` (byte span, message, expected, found) instead of a rendered report; `FromHoaError::render(src, color)` produces the ariadne report. The never-constructed variants `UnsupportedAcceptanceCondition`, `ParseAcceptanceCondition` and `UnsupportedBody` are removed.
+
 - Lexer: strings follow the spec's C-like syntax (`\"` and `\\` are decoded, other escapes are kept verbatim), comments nest, and `--ABORT--` lexes as `Token::Abort` (it used to be `Token::BodyEnd`). `Token::Bool` is gone; `t`/`f` are identifiers.
 - `--ABORT--` handling works on tokens instead of substrings: `from_hoa` only rejects real aborts (not one inside a string, nor `foo--ABORT--`), and `parse_hoa_automata` and `first_automaton_split_position` lex the input once and split the token stream, so an automaton following an aborted one in the same chunk is returned. A lexer error now makes `parse_hoa_automata` return nothing, and `first_automaton_split_position` return `None`.
 - `Property` and `AcceptanceName` gained an `Other(String)` variant, and their `TryFrom<String>` impls became infallible `From<String>`. Unknown `properties:` values (e.g. `semi-deterministic`) and `acc-name:` names (e.g. `Rabin-like`) now parse and are written back verbatim.

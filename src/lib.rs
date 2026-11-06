@@ -1,6 +1,7 @@
 //! This crate provides a parser for the HOA format.
 // #![warn(missing_docs)]
 mod body;
+mod error;
 mod format;
 mod header;
 pub mod input;
@@ -16,9 +17,7 @@ pub use label::{
 
 use tracing::warn;
 
-use std::fmt::{Debug, Display};
-
-use ariadne::{Color, Fmt, ReportKind, Source};
+use std::fmt::Debug;
 
 #[allow(unused_imports)]
 use chumsky::prelude::*;
@@ -30,6 +29,7 @@ pub use format::{
 };
 
 pub use body::{Body, Edge, State};
+pub use error::{Diagnostic, FromHoaError, ValidationError};
 pub use header::{Header, HeaderItem, UnknownValue};
 
 use itertools::Itertools;
@@ -37,96 +37,6 @@ use lexer::Token;
 
 /// The type of identifier used for states.
 pub type Id = u32;
-
-/// Represents the different types of error that can be encountered when parsing a [`HoaRepresentation`].
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum FromHoaError {
-    /// The version string does not match, we only support v1.
-    UnsupportedVersion(String),
-    /// Encapsulates that an unsupported acceptance condition was used.
-    UnsupportedAcceptanceCondition,
-    /// An error occurred when parsing the acceptance condition.
-    ParseAcceptanceCondition(String),
-    /// There was an error in the body.
-    UnsupportedBody,
-    /// Lexer encountered an error, contains detailed report.
-    LexerError(String),
-    /// Parser encountered an error, contains detailed report.
-    ParserError(String),
-    /// Abort token was encountered.
-    Abort,
-    /// The automaton parsed but violates a rule of the format.
-    Invalid(ValidationError),
-}
-
-/// A violation of the HOA format found by [`HoaRepresentation::validate`].
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum ValidationError {
-    /// There is no `Acceptance:` header item.
-    MissingAcceptance,
-    /// A header item that may appear at most once appears several times.
-    DuplicateHeader(&'static str),
-    /// An acceptance set is not below the count given in `Acceptance:`.
-    AcceptanceSetOutOfRange {
-        /// The offending acceptance set.
-        set: Id,
-        /// The number of acceptance sets.
-        count: Id,
-    },
-    /// A state is not below the count given in `States:`.
-    StateOutOfRange {
-        /// The offending state.
-        state: Id,
-        /// The number of states.
-        count: Id,
-    },
-    /// An atomic proposition is not below the count given in `AP:`.
-    ApOutOfRange {
-        /// The offending atomic proposition.
-        ap: u16,
-        /// The number of atomic propositions (0 if there is no `AP:` item).
-        count: usize,
-    },
-}
-
-impl Display for ValidationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::MissingAcceptance => write!(f, "missing `Acceptance:` header item"),
-            Self::DuplicateHeader(name) => write!(f, "`{name}:` appears more than once"),
-            Self::AcceptanceSetOutOfRange { set, count } => {
-                write!(f, "acceptance set {set} used but only {count} declared")
-            }
-            Self::StateOutOfRange { state, count } => {
-                write!(f, "state {state} used but only {count} states declared")
-            }
-            Self::ApOutOfRange { ap, count } => {
-                write!(f, "AP {ap} used but only {count} declared")
-            }
-        }
-    }
-}
-
-impl Display for FromHoaError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FromHoaError::UnsupportedVersion(version) => {
-                write!(f, "Unsupported HOA version ({})", version)
-            }
-            FromHoaError::UnsupportedAcceptanceCondition => {
-                write!(f, "Unsupported acceptance condition")
-            }
-            FromHoaError::UnsupportedBody => write!(f, "Unsupported body"),
-            FromHoaError::ParseAcceptanceCondition(message) => {
-                write!(f, "Could not parse acceptance condition: {}", message)
-            }
-            FromHoaError::Abort => write!(f, "Abort token encountered"),
-            FromHoaError::Invalid(err) => write!(f, "Invalid automaton: {}", err),
-            FromHoaError::LexerError(rep) => write!(f, "Lexer error: {}", rep),
-            FromHoaError::ParserError(rep) => write!(f, "Parser error: {}", rep),
-        }
-    }
-}
 
 /// Represents a parsed HOA automaton. It consists of a the version string,
 /// a [`Header`] and a [`Body`].
@@ -518,66 +428,6 @@ fn is_atom(expr: &AbstractLabelExpression) -> bool {
             | AbstractLabelExpression::Integer(_)
             | AbstractLabelExpression::Alias(_)
     )
-}
-
-fn build_error_report<'a, T: std::fmt::Display + 'a>(
-    input: &str,
-    errs: impl IntoIterator<Item = chumsky::error::Rich<'a, T>>,
-) -> String {
-    use chumsky::error::RichReason;
-    errs.into_iter()
-        .map(|e| {
-            let span = e.span().into_range();
-            let report = ariadne::Report::build(ReportKind::Error, span.clone())
-                .with_config(ariadne::Config::default().with_index_type(ariadne::IndexType::Byte));
-            let (message, label) = match e.reason() {
-                RichReason::Custom(msg) => (msg.clone(), msg.clone()),
-                _ => {
-                    let found = e.found().map(|t| t.to_string());
-                    let expected = e.expected().map(|p| p.to_string()).collect::<Vec<_>>();
-                    (
-                        format!(
-                            "{}, expected {}",
-                            if found.is_some() {
-                                "Unexpected token in input"
-                            } else {
-                                "Unexpected end of input"
-                            },
-                            if expected.is_empty() {
-                                "something else".to_string()
-                            } else {
-                                expected.join(", ")
-                            }
-                        ),
-                        format!("Unexpected token {}", found.unwrap_or("end of file".into())),
-                    )
-                }
-            };
-            let report = report.with_message(message).with_label(
-                ariadne::Label::new(span)
-                    .with_message(label.fg(Color::Red))
-                    .with_color(Color::Red),
-            );
-
-            let mut report_output = Vec::new();
-            report
-                .finish()
-                .write(Source::from(input), &mut report_output)
-                .unwrap();
-
-            std::str::from_utf8(&report_output)
-                .unwrap_or("Could not parse error report")
-                .to_string()
-        })
-        .join("\n")
-}
-
-#[cfg(test)]
-fn print_error_report<'a, T: std::fmt::Display + 'a>(
-    input: &str,
-    errs: impl IntoIterator<Item = chumsky::error::Rich<'a, T>>,
-) {
-    tracing::error!("{}", build_error_report(input, errs))
 }
 
 /// Splits a token stream into automata: each returned chunk ends with a `--END--`, a

@@ -286,14 +286,18 @@ mod tests {
 
     #[cfg(test)]
     pub fn process_body(input: &str) -> Result<Vec<State>, ()> {
-        use crate::{body::Body, print_error_report};
+        use crate::body::Body;
 
         let ast = crate::value::ws()
             .ignore_then(Body::parser::<chumsky::error::Rich<char, crate::value::Span>>())
             .then_ignore(end())
             .parse(input)
             .into_result()
-            .map_err(|errors| print_error_report(input, errors))?;
+            .map_err(|errors| {
+                for e in &errors {
+                    tracing::error!("{}", crate::Diagnostic::from_rich(e));
+                }
+            })?;
         // the tests only use explicit labels, so the AP count does not matter
         ast.into_iter()
             .map(|s| s.resolve(0).map_err(|_| ()))
