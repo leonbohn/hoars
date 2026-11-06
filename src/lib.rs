@@ -24,7 +24,7 @@ use ariadne::{Color, Fmt, ReportKind, Source};
 use chumsky::prelude::*;
 pub use format::*;
 
-use chumsky::{Parser, prelude::Simple};
+use chumsky::Parser;
 pub use format::{
     AcceptanceCondition, AcceptanceInfo, AcceptanceName, AcceptanceSignature, AliasName, Property,
 };
@@ -153,7 +153,10 @@ impl HoaRepresentation {
 
     /// Returns the version of the HOA file.
     pub fn version(&self) -> String {
-        self.header.get_version().expect("Version must be set!")
+        self.header
+            .get_version()
+            .expect("Version must be set!")
+            .to_string()
     }
 
     /// Returns the header of the HOA file.
@@ -175,9 +178,10 @@ impl HoaRepresentation {
     }
 
     /// Parses a HOA automaton from a string.
-    #[allow(clippy::result_large_err)]
-    pub fn parser() -> impl Parser<Token, Self, Error = Simple<Token>> {
-        Header::parser()
+    pub fn parser<'a, X: value::HoaErr<'a>>()
+    -> impl Parser<'a, &'a str, Self, chumsky::extra::Err<X>> {
+        value::ws()
+            .ignore_then(Header::parser())
             .then(Body::parser())
             .then_ignore(end())
             .try_map(|(header, raw_states), span| {
@@ -189,12 +193,12 @@ impl HoaRepresentation {
                     })
                     .unwrap_or(0);
                 let num_aps = u16::try_from(num_aps)
-                    .map_err(|_| Simple::custom(span.clone(), "too many atomic propositions"))?;
+                    .map_err(|_| X::custom(span, "too many atomic propositions".to_string()))?;
                 let states = raw_states
                     .into_iter()
                     .map(|s| s.resolve(num_aps))
                     .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| Simple::custom(span, e))?;
+                    .map_err(|e| X::custom(span, e))?;
                 Ok(HoaRepresentation::from_parts(header, states.into()))
             })
     }
@@ -212,12 +216,13 @@ impl HoaRepresentation {
     /// - all states are defined exactly once
     pub fn verify(&self) -> Result<(), String> {
         let mut errors = Vec::new();
-        let mut states = Vec::new();
-        for state in self.body().iter() {
-            if states.contains(&state.id()) {
-                errors.push(format!("State {} is defined more than once!", state.id()));
+        // `body_mut`/`add_state` can leave the body unsorted, so sort the ids instead of relying on it
+        let mut states: Vec<_> = self.body().iter().map(|s| s.id()).collect();
+        states.sort_unstable();
+        for pair in states.windows(2) {
+            if pair[0] == pair[1] {
+                errors.push(format!("State {} is defined more than once!", pair[0]));
             }
-            states.push(state.id());
         }
         if let Some(num_states) = self.num_states()
             && states.len() != num_states
@@ -383,13 +388,17 @@ impl HoaRepresentation {
 
     /// Returns the aliases of the automaton.
     pub fn aliases(&self) -> Vec<(AliasName, AbstractLabelExpression)> {
-        self.header()
-            .iter()
-            .filter_map(|item| match item {
-                HeaderItem::Alias(name, expr) => Some((name.clone(), expr.clone())),
-                _ => None,
-            })
+        self.alias_iter()
+            .map(|(name, expr)| (name.clone(), expr.clone()))
             .collect()
+    }
+
+    /// Iterates over the `Alias:` header items without cloning them.
+    pub fn alias_iter(&self) -> impl Iterator<Item = (&AliasName, &AbstractLabelExpression)> {
+        self.header().iter().filter_map(|item| match item {
+            HeaderItem::Alias(name, expr) => Some((name, expr)),
+            _ => None,
+        })
     }
 
     /// Replaces all alias references (`@name`) in the aliases and in the edge labels by
@@ -399,9 +408,8 @@ impl HoaRepresentation {
     /// Parsing does not unalias, so call this before converting labels to BDDs.
     pub fn unalias(&mut self) -> Result<(), String> {
         let raw: std::collections::HashMap<_, _> = self
-            .aliases()
-            .into_iter()
-            .map(|(name, expr)| (name.0, expr))
+            .alias_iter()
+            .map(|(name, expr)| (name.0.clone(), expr.clone()))
             .collect();
         let defs = raw
             .iter()
@@ -512,71 +520,44 @@ fn is_atom(expr: &AbstractLabelExpression) -> bool {
     )
 }
 
-fn build_error_report<I: Iterator<Item = Simple<String>>>(input: &str, errs: I) -> String {
+fn build_error_report<'a, T: std::fmt::Display + 'a>(
+    input: &str,
+    errs: impl IntoIterator<Item = chumsky::error::Rich<'a, T>>,
+) -> String {
+    use chumsky::error::RichReason;
     errs.into_iter()
         .map(|e| {
-            let report = ariadne::Report::build(ReportKind::Error, e.span());
-
-            let report = match e.reason() {
-                chumsky::error::SimpleReason::Unexpected => report
-                    .with_message(format!(
-                        "{}, expected {}",
-                        if e.found().is_some() {
-                            "Unexpected token in input"
-                        } else {
-                            "Unexpected end of input"
-                        },
-                        if e.expected().len() == 0 {
-                            "something else".to_string()
-                        } else {
-                            e.expected()
-                                .map(|expected| match expected {
-                                    Some(expected) => expected.to_string(),
-                                    None => "end of input".to_string(),
-                                })
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        }
-                    ))
-                    .with_label(
-                        ariadne::Label::new(e.span())
-                            .with_message(format!(
-                                "Unexpected token {}",
-                                e.found()
-                                    .unwrap_or(&"end of file".to_string())
-                                    .fg(Color::Red)
-                            ))
-                            .with_color(Color::Red),
-                    ),
-                chumsky::error::SimpleReason::Unclosed { span, delimiter } => report
-                    .with_message(format!(
-                        "Unclosed delimiter {}",
-                        delimiter.fg(Color::Yellow)
-                    ))
-                    .with_label(
-                        ariadne::Label::new(span.clone())
-                            .with_message(format!(
-                                "Unclosed delimiter {}",
-                                delimiter.fg(Color::Yellow)
-                            ))
-                            .with_color(Color::Yellow),
+            let span = e.span().into_range();
+            let report = ariadne::Report::build(ReportKind::Error, span.clone())
+                .with_config(ariadne::Config::default().with_index_type(ariadne::IndexType::Byte));
+            let (message, label) = match e.reason() {
+                RichReason::Custom(msg) => (msg.clone(), msg.clone()),
+                _ => {
+                    let found = e.found().map(|t| t.to_string());
+                    let expected = e.expected().map(|p| p.to_string()).collect::<Vec<_>>();
+                    (
+                        format!(
+                            "{}, expected {}",
+                            if found.is_some() {
+                                "Unexpected token in input"
+                            } else {
+                                "Unexpected end of input"
+                            },
+                            if expected.is_empty() {
+                                "something else".to_string()
+                            } else {
+                                expected.join(", ")
+                            }
+                        ),
+                        format!("Unexpected token {}", found.unwrap_or("end of file".into())),
                     )
-                    .with_label(
-                        ariadne::Label::new(e.span())
-                            .with_message(format!(
-                                "Must be closed before this {}",
-                                e.found()
-                                    .unwrap_or(&"end of file".to_string())
-                                    .fg(Color::Red)
-                            ))
-                            .with_color(Color::Red),
-                    ),
-                chumsky::error::SimpleReason::Custom(msg) => report.with_message(msg).with_label(
-                    ariadne::Label::new(e.span())
-                        .with_message(format!("{}", msg.fg(Color::Red)))
-                        .with_color(Color::Red),
-                ),
+                }
             };
+            let report = report.with_message(message).with_label(
+                ariadne::Label::new(span)
+                    .with_message(label.fg(Color::Red))
+                    .with_color(Color::Red),
+            );
 
             let mut report_output = Vec::new();
             report
@@ -592,14 +573,17 @@ fn build_error_report<I: Iterator<Item = Simple<String>>>(input: &str, errs: I) 
 }
 
 #[cfg(test)]
-fn print_error_report<I: Iterator<Item = Simple<String>>>(input: &str, errs: I) {
+fn print_error_report<'a, T: std::fmt::Display + 'a>(
+    input: &str,
+    errs: impl IntoIterator<Item = chumsky::error::Rich<'a, T>>,
+) {
     tracing::error!("{}", build_error_report(input, errs))
 }
 
 /// Splits a token stream into automata: each returned chunk ends with a `--END--`, a
 /// trailing chunk without `--END--` is returned last. An `--ABORT--` discards everything
 /// since the previous boundary.
-fn split_automata(tokens: Vec<(Token, lexer::Span)>) -> Vec<Vec<(Token, lexer::Span)>> {
+fn split_automata(tokens: Vec<(Token<'_>, lexer::Span)>) -> Vec<Vec<(Token<'_>, lexer::Span)>> {
     let mut chunks = Vec::new();
     let mut current = Vec::new();
     for (token, span) in tokens {
@@ -633,13 +617,7 @@ pub fn first_automaton_split_position(input: &str) -> Option<usize> {
         .pop()?
         .1
         .end;
-    // spans count characters, the result is a byte index
-    Some(
-        input
-            .char_indices()
-            .nth(end)
-            .map_or(input.len(), |(i, _)| i),
-    )
+    Some(end)
 }
 
 /// Parses all automata in `input`. Automata that are aborted or that fail to parse are
@@ -657,7 +635,9 @@ pub fn parse_hoa_automata(input: &str) -> Vec<HoaRepresentation> {
         if !chunk.iter().any(|(t, _)| *t == Token::BodyStart) {
             continue;
         }
-        match input::parse_tokens(input, chunk) {
+        // chunks are never empty; error reports refer to the text of the chunk
+        let text = &input[chunk[0].1.start..chunk[chunk.len() - 1].1.end];
+        match input::parse_str(text) {
             Ok(aut) => out.push(aut),
             Err(e) => warn!("Error when parsing automaton: {}", e),
         }
@@ -1024,6 +1004,20 @@ State: 0
             None
         );
         assert_eq!(super::first_automaton_split_position("HOA: v1\n"), None);
+    }
+
+    #[test]
+    fn verify_reports_duplicate_states_even_if_unsorted() {
+        let mut aut = HoaRepresentation::try_from(
+            "HOA: v1\nStates: 3\nAcceptance: 0 t\n--BODY--\nState: 0\nState: 1\nState: 2\n--END--",
+        )
+        .unwrap();
+        assert_eq!(Ok(()), aut.verify());
+        let dup = aut.body()[0].clone();
+        aut.body_mut().insert(0, dup);
+        aut.body_mut().swap(0, 3);
+        let err = aut.verify().unwrap_err();
+        assert!(err.contains("State 0 is defined more than once!"), "{err}");
     }
 
     #[test]

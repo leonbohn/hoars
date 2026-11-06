@@ -18,8 +18,26 @@ biodivine-lib-bdd = "0.6"
 itertools = "0.15"
 
 ariadne = "0.6"
-chumsky = { version = "0.9.3", default-features = false, features = [
-    "ahash",
-    "std",
-] }
+chumsky = { version = "0.13", default-features = false, features = ["std"] }
 lazy_static = "1.5.0"
+
+[dev-dependencies]
+criterion = "0.8"
+# the runner (gungraun-runner) must have exactly this version
+gungraun = "=0.20.0"
+
+[[bench]]
+name = "parse"
+harness = false
+
+[[bench]]
+name = "verify"
+harness = false
+
+[[bench]]
+name = "write"
+harness = false
+
+[[bench]]
+name = "wallclock"
+harness = false

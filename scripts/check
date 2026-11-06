@@ -7,5 +7,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 echo "cargo clippy --all -- -D warnings passed"
 cargo doc --no-deps
 echo "doc tests passed"
+cargo bench --no-run
+echo "benchmarks compile"
 cargo test
 echo "cargo test --all passed"

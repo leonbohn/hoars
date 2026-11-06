@@ -30,3 +30,19 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 - Parsers use `chumsky` 0.9 (`Simple<Token>` errors), flagged with `allow(clippy::result_large_err)` in several places.
 - Test coverage is small (10 unit tests); no fuzzing.
 - Version `0.3.0` is the first release since crates.io `0.2.0` (breaking: `biodivine-lib-bdd` 0.6).
+
+## Benchmarks
+
+Same approach as `automata` (see its `docs/benchmarking.md`): instruction counts under valgrind
+with gungraun (needs `valgrind` and `gungraun-runner` 0.20.0), deterministic, differences above
+~1% are real. Inputs are the generator of REFACTOR.md P2 (`benches/common`) and `hoa/bench/`.
+
+```shell
+cargo bench --bench parse               # also: verify, write (~80 s each)
+cargo bench --bench parse -- --save-baseline=main   # on main, then on the branch:
+cargo bench --bench parse -- --baseline=main        # prints the diff
+HOARS_BENCH_XL=1 cargo bench --bench wallclock      # criterion, includes the 200k-state input
+```
+
+Put the before/after table in the PR. For the effect on `automata`, run its `automata-bench compare`
+with `[patch.crates-io] hoars = { path = "../hoars" }` applied on both sides.

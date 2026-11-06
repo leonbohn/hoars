@@ -4,9 +4,9 @@ use chumsky::prelude::*;
 
 use crate::{
     AbstractLabelExpression, AcceptanceCondition, AcceptanceInfo, AcceptanceName, AliasName, Id,
-    Property, Token,
+    Property,
     format::{AtomicProposition, StateConjunction},
-    value,
+    value::{self, HoaErr, sym, tok},
 };
 
 /// Represents a header item in a HOA file, for more information on each
@@ -84,61 +84,61 @@ impl HeaderItem {
     }
 }
 
-#[allow(clippy::result_large_err)]
-fn item() -> impl Parser<Token, HeaderItem, Error = Simple<Token>> {
-    let states = just(Token::Header("States".to_string()))
+fn item<'a, X: HoaErr<'a>>() -> impl Parser<'a, &'a str, HeaderItem, extra::Err<X>> {
+    let states = tok("States:")
         .ignore_then(value::integer())
         .map(HeaderItem::States);
 
-    let acceptance_name = just(Token::Header("acc-name".to_string()))
+    let acceptance_name = tok("acc-name:")
         .ignore_then(value::identifier())
         .map(AcceptanceName::from)
-        .then(value::acceptance_info().repeated())
+        .then(value::acceptance_info().repeated().collect::<Vec<_>>())
         .map(|(name, info)| HeaderItem::AcceptanceName(name, info));
 
-    let start = just(Token::Header("Start".to_string()))
-        .ignore_then(value::integer().separated_by(just(Token::Op('&'))))
+    let start = tok("Start:")
+        .ignore_then(value::integer().separated_by(sym('&')).collect())
         .map(|conjunction| HeaderItem::Start(StateConjunction(conjunction)));
 
-    let aps = just(Token::Header("AP".to_string()))
+    let aps = tok("AP:")
         .ignore_then(value::integer())
-        .then(value::text().repeated())
+        .then(value::text().repeated().collect::<Vec<_>>())
         .try_map(|(num, prop_labels), span| {
             if (num as usize) == prop_labels.len() {
                 Ok(HeaderItem::AP(prop_labels))
             } else {
-                Err(Simple::custom(
+                Err(X::custom(
                     span,
                     format!("Expected {} aps but got {}", num, prop_labels.len()),
                 ))
             }
         });
 
-    let acceptance = just(Token::Header("Acceptance".to_string()))
+    let acceptance = tok("Acceptance:")
         .ignore_then(value::integer())
         .then(value::acceptance_condition())
         .map(|(count, condition)| HeaderItem::Acceptance(count, condition));
 
-    let alias = just(Token::Header("Alias".to_string()))
+    let alias = tok("Alias:")
         .ignore_then(value::alias_name())
         .then(value::label_expression())
         .map(|(aname, expression)| HeaderItem::Alias(AliasName(aname), expression));
 
-    let name = just(Token::Header("name".to_string()))
+    let name = tok("name:")
         .ignore_then(value::text())
         .map(HeaderItem::Name);
 
-    let tool = just(Token::Header("tool".to_string()))
+    let tool = tok("tool:")
         .ignore_then(value::text())
         .then(value::text().or_not())
         .map(|(tool, version)| HeaderItem::Tool(tool, version));
 
-    let properties = just(Token::Header("properties".to_string()))
+    let properties = tok("properties:")
         .ignore_then(
             value::identifier()
                 .map(Property::from)
                 .repeated()
-                .at_least(1),
+                .at_least(1)
+                .collect::<Vec<_>>(),
         )
         .map(HeaderItem::Properties);
 
@@ -153,14 +153,17 @@ fn item() -> impl Parser<Token, HeaderItem, Error = Simple<Token>> {
         "tool",
         "name",
     ];
-    let unknown = select! { Token::Header(name) if !KNOWN.contains(&name.as_str()) && name != "properties" => name }
+    let unknown = value::header_name()
+        .filter(|name: &&str| !KNOWN.contains(name) && *name != "properties")
+        .map(str::to_string)
         .then(
-            select! {
-                Token::Int(i) => UnknownValue::Int(i),
-                Token::Text(t) => UnknownValue::Text(t),
-                Token::Identifier(i) => UnknownValue::Identifier(i),
-            }
-            .repeated(),
+            choice((
+                value::int_text().map(|i: &str| UnknownValue::Int(i.to_string())),
+                value::text().map(UnknownValue::Text),
+                value::identifier().map(UnknownValue::Identifier),
+            ))
+            .repeated()
+            .collect::<Vec<_>>(),
         )
         .map(|(name, values)| {
             if name.starts_with(|c: char| c.is_ascii_uppercase()) {
@@ -169,7 +172,7 @@ fn item() -> impl Parser<Token, HeaderItem, Error = Simple<Token>> {
             HeaderItem::Unknown(name, values)
         });
 
-    chumsky::primitive::choice((
+    choice((
         states,
         acceptance,
         acceptance_name,
@@ -205,12 +208,12 @@ impl<'a> IntoIterator for &'a Header {
 
 impl Header {
     /// Construts a new header parser.
-    pub fn parser() -> impl Parser<Token, Self, Error = Simple<Token>> {
-        let version = just(Token::Header("HOA".to_string()))
+    pub fn parser<'a, X: HoaErr<'a>>() -> impl Parser<'a, &'a str, Self, extra::Err<X>> {
+        let version = tok("HOA:")
             .ignore_then(value::identifier())
             .map(HeaderItem::Version);
         version
-            .then(item().repeated())
+            .then(item().repeated().collect::<Vec<_>>())
             .map(|(version, headers)| Header(std::iter::once(version).chain(headers).collect()))
     }
 
@@ -220,9 +223,9 @@ impl Header {
     }
 
     /// Returns the version of the format.
-    pub fn get_version(&self) -> Option<String> {
+    pub fn get_version(&self) -> Option<&str> {
         self.iter().find_map(|item| match item {
-            HeaderItem::Version(version) => Some(version.clone()),
+            HeaderItem::Version(version) => Some(version.as_str()),
             _ => None,
         })
     }
@@ -254,39 +257,19 @@ impl DerefMut for Header {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(test)]
-    #[allow(clippy::unnecessary_unwrap)]
     pub fn process_header(input: &str) -> Result<Vec<HeaderItem>, String> {
-        use chumsky::Stream;
-
-        use crate::{build_error_report, lexer};
+        use crate::build_error_report;
 
         let with_hoa = format!("HOA: v1\n{}", input);
-
-        let (tokens, errs) = lexer::tokenizer().parse_recovery(with_hoa);
-        if let Some(tokens) = tokens {
-            let len = input.chars().count();
-            let (ast, parse_errs) = Header::parser()
-                .then_ignore(end())
-                .parse_recovery(Stream::from_iter(len..len + 1, tokens.into_iter()));
-
-            if parse_errs.is_empty() && ast.is_some() {
-                let out = ast.unwrap();
-                Ok(out.0)
-            } else {
-                Err(build_error_report(
-                    input,
-                    errs.into_iter()
-                        .map(|err| err.map(|c| c.to_string()))
-                        .chain(parse_errs.into_iter().map(|err| err.map(|c| c.to_string()))),
-                ))
-            }
-        } else {
-            Err(build_error_report(
-                input,
-                errs.into_iter().map(|err| err.map(|c| c.to_string())),
-            ))
-        }
+        crate::value::ws()
+            .ignore_then(Header::parser::<
+                chumsky::error::Rich<char, crate::value::Span>,
+            >())
+            .then_ignore(end())
+            .parse(&with_hoa)
+            .into_result()
+            .map(|header| header.0)
+            .map_err(|errors| build_error_report(&with_hoa, errors))
     }
 
     use tracing::error;

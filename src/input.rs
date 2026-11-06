@@ -1,48 +1,63 @@
-use chumsky::{Parser, Stream};
+use chumsky::Parser;
 
 use crate::{FromHoaError, HoaRepresentation, Token, build_error_report, lexer};
 
-/// Lexes `input` into tokens with their (character) spans.
-pub(crate) fn lex(input: &str) -> Result<Vec<(Token, lexer::Span)>, FromHoaError> {
-    let start = std::time::Instant::now();
+/// Lexes `input` into tokens with their (byte) spans. The parser itself does not use the
+/// tokens, only [`crate::parse_hoa_automata`] and [`crate::first_automaton_split_position`] do,
+/// to find where automata begin and end.
+pub(crate) fn lex(input: &str) -> Result<Vec<(Token<'_>, lexer::Span)>, FromHoaError> {
     let tokens = lexer::tokenizer()
         .parse(input)
-        .map_err(|error_list| {
-            build_error_report(
+        .into_result()
+        .map_err(|errors| {
+            build_error_report::<char>(
                 input,
-                error_list.into_iter().map(|err| err.map(|c| c.to_string())),
+                errors.into_iter().map(|e| {
+                    let found = input[e.span().start..].chars().next();
+                    chumsky::error::Rich::custom(
+                        *e.span(),
+                        match found {
+                            Some(c) => format!("unexpected character {c:?}"),
+                            None => "unexpected end of input".to_string(),
+                        },
+                    )
+                }),
             )
         })
         .map_err(FromHoaError::LexerError)?;
-    tracing::info!("Tokenization took {}µs", start.elapsed().as_micros());
     Ok(tokens)
 }
 
 pub fn from_hoa(value: &str) -> Result<HoaRepresentation, FromHoaError> {
-    let tokens = lex(value)?;
-    if tokens.iter().any(|(t, _)| *t == Token::Abort) {
-        return Err(FromHoaError::Abort);
-    }
-    parse_tokens(value, tokens)
+    parse_str(value)
 }
 
-/// Parses already lexed `tokens` that stem from `input` (used for error reports).
-pub(crate) fn parse_tokens(
-    input: &str,
-    tokens: Vec<(Token, lexer::Span)>,
-) -> Result<HoaRepresentation, FromHoaError> {
-    let length = input.chars().count();
-    let start = std::time::Instant::now();
-    let out = HoaRepresentation::parser()
-        .parse(Stream::from_iter(length..length + 1, tokens.into_iter()))
-        .map_err(|error_list| {
-            build_error_report(
-                input,
-                error_list.into_iter().map(|err| err.map(|c| c.to_string())),
-            )
-        })
-        .map_err(FromHoaError::ParserError)
-        .and_then(|aut| aut.validate().map(|()| aut));
-    tracing::info!("Actual parsing took {}µs", start.elapsed().as_micros());
-    out
+/// Parses exactly one automaton from `input` (text, comments and whitespace included).
+pub(crate) fn parse_str(input: &str) -> Result<HoaRepresentation, FromHoaError> {
+    // First attempt without error tracking (much faster); only if it fails, look closer to
+    // produce the diagnostics.
+    match HoaRepresentation::parser::<chumsky::error::EmptyErr>()
+        .parse(input)
+        .into_result()
+    {
+        Ok(aut) => aut.validate().map(|()| aut),
+        Err(_) => Err(diagnose(input)),
+    }
+}
+
+/// The error for an `input` that failed to parse: a lexical error, an abort, or the parse error.
+fn diagnose(input: &str) -> FromHoaError {
+    match lex(input) {
+        Err(e) => e,
+        Ok(tokens) if tokens.iter().any(|(t, _)| *t == Token::Abort) => FromHoaError::Abort,
+        Ok(_) => FromHoaError::ParserError(
+            match HoaRepresentation::parser::<chumsky::error::Rich<char, lexer::Span>>()
+                .parse(input)
+                .into_result()
+            {
+                Err(errors) => build_error_report(input, errors),
+                Ok(_) => "parsing failed".to_string(),
+            },
+        ),
+    }
 }
