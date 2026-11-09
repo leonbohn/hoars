@@ -20,17 +20,17 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 ## Layout
 
 - `src/lexer.rs`: tokens (`chumsky`-based). `src/input.rs`: parsing entry points, `ariadne` diagnostics.
-- `src/header.rs`, `src/body.rs`, `src/value.rs`: parsers/types for the header items, the body (states, edges), and values (integers, acceptance expressions, labels via `biodivine-lib-bdd`).
+- `src/header.rs`, `src/body.rs`, `src/value.rs`: parsers/types for the header items, the body (states, edges), and values (integers, acceptance expressions, labels as `AbstractLabelExpression`; there is no BDD library, interpreting a label is up to the user).
 - `src/format.rs`, `src/output.rs`: writing HOA. `src/interpretation.rs`: unaliasing and interpretation of the parsed automaton.
 - `src/lib.rs`: `HoaAutomaton` (header + body), `from_parts`, `from_hoa` helpers.
 - `hoa/`: sample HOA files used by tests (`spec/`, `spot/`; `bench/` is for benchmarks only); `doc/hoaf.pdf`: the format specification.
 
 ## Known sharp edges
 
-- MSRV is 1.88 (`rust-version`; `biodivine-lib-bdd` needs it), checked in CI for the library only.
+- MSRV is 1.88 (`rust-version`), checked in CI for the library only.
 - Parsers use `chumsky` 0.9 (`Simple<Token>` errors), flagged with `allow(clippy::result_large_err)` in several places.
 - 52 unit tests, including one that parses, round-trips and converts every fixture in `hoa/` (`hoa/spec/` holds the spec examples, `hoa/spot/` real Spot output); no fuzzing.
-- Version `0.4.0` is the first release since crates.io `0.2.0` (0.3.0 was never published); breaking changes include `biodivine-lib-bdd` 0.6 and the reworked `Header`/`Body`/error API.
+- Version `0.4.0` is the first release since crates.io `0.2.0` (0.3.0 was never published); breaking changes include the reworked `Header`/`Body`/error API.
 
 ## Benchmarks
 

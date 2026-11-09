@@ -137,41 +137,6 @@ impl Display for ValidationError {
     }
 }
 
-/// Why a label expression could not be converted to a BDD, see
-/// [`crate::AbstractLabelExpression::try_into_bdd`].
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum LabelError {
-    /// The expression uses an atomic proposition that the variable set does not have.
-    ApOutOfRange {
-        /// The offending atomic proposition.
-        ap: u16,
-        /// The number of variables in the BDD variable set.
-        count: u16,
-    },
-    /// The expression contains an alias reference (`@name`) that was not substituted;
-    /// call [`crate::HoaRepresentation::unalias`] before converting.
-    UnresolvedAlias(String),
-}
-
-impl Display for LabelError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ApOutOfRange { ap, count } => {
-                write!(
-                    f,
-                    "AP identifier {ap} is too high, the set has {count} variables"
-                )
-            }
-            Self::UnresolvedAlias(name) => write!(
-                f,
-                "alias @{name} is not resolved, call `HoaRepresentation::unalias` first"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for LabelError {}
-
 /// An `@name` reference that [`crate::HoaRepresentation::unalias`] cannot substitute.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum AliasError {
@@ -322,13 +287,6 @@ mod tests {
     #[test]
     fn conversion_errors_are_std_errors() {
         let boxed = |e: Box<dyn std::error::Error>| e.to_string();
-        assert!(
-            boxed(Box::new(crate::LabelError::ApOutOfRange {
-                ap: 2,
-                count: 1
-            }))
-            .contains("AP identifier 2")
-        );
         assert!(
             boxed(Box::new(crate::AliasError::Undefined("a".into()))).contains("@a is not defined")
         );

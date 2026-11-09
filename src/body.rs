@@ -3,7 +3,7 @@ use std::ops::Deref;
 use chumsky::prelude::*;
 
 use crate::{
-    AbstractLabelExpression, AcceptanceSignature, Id, Label, LabelExpression, StateConjunction,
+    AbstractLabelExpression, AcceptanceSignature, Id, Label, StateConjunction,
     value::{self, HoaErr, sym, tok},
 };
 
@@ -21,7 +21,7 @@ pub(crate) struct RawState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RawEdge(Option<Label>, StateConjunction, Option<AcceptanceSignature>);
 
-/// Represents an edge in a HOA automaton. It contains the [`crate::LabelExpression`], the
+/// Represents an edge in a HOA automaton. It contains the [`Label`], the
 /// [`StateConjunction`] and the [`AcceptanceSignature`] of the edge.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Edge(
@@ -194,18 +194,17 @@ fn implicit_label(i: usize, num_aps: u16) -> Label {
             }
         })
         .collect();
-    Label(LabelExpression::Abstract(match literals.len() {
+    Label(match literals.len() {
         0 => AbstractLabelExpression::Boolean(true),
         1 => literals.remove(0),
         _ => AbstractLabelExpression::Conjunction(literals),
-    }))
+    })
 }
 
 pub fn label<'a, X: HoaErr<'a>>() -> impl Parser<'a, &'a str, Label, extra::Err<X>> + Clone {
     sym('[')
         .ignore_then(value::label_expression())
         .then_ignore(sym(']'))
-        .map(LabelExpression::Abstract)
         .map(Label)
 }
 
@@ -338,12 +337,10 @@ mod tests {
         [0 & !1] 0 {0}
         [1] 1 {0}"#;
         let t0 = Edge::from_parts(
-            Label(crate::LabelExpression::Abstract(
-                AbstractLabelExpression::Conjunction(vec![
-                    AbstractLabelExpression::Integer(0),
-                    AbstractLabelExpression::Negated(Box::new(AbstractLabelExpression::Integer(1))),
-                ]),
-            )),
+            Label(AbstractLabelExpression::Conjunction(vec![
+                AbstractLabelExpression::Integer(0),
+                AbstractLabelExpression::Negated(Box::new(AbstractLabelExpression::Integer(1))),
+            ])),
             StateConjunction(vec![0]),
             crate::AcceptanceSignature(vec![0]),
         );

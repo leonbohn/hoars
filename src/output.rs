@@ -1,43 +1,16 @@
 use std::fmt::Display;
 
-use biodivine_lib_bdd::Bdd;
 use itertools::Itertools;
 
 use crate::{
     AcceptanceAtom, AcceptanceCondition, AcceptanceInfo, AcceptanceName, AcceptanceSignature,
-    AliasName, Edge, HeaderItem, HoaBool, HoaRepresentation, Label, LabelExpression, Property,
-    State, StateConjunction, UnknownValue,
+    AliasName, Edge, HeaderItem, HoaBool, HoaRepresentation, Label, Property, State,
+    StateConjunction, UnknownValue,
 };
 
 /// Quotes a string for use in HOA, escaping backslashes and double quotes.
 fn quote(text: &str) -> String {
     format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
-}
-
-/// Renders a [`Bdd`] as a HOA label expression in disjunctive normal form.
-fn bdd_to_expression(bdd: &Bdd) -> String {
-    if bdd.is_true() {
-        return "t".to_string();
-    }
-    if bdd.is_false() {
-        return "f".to_string();
-    }
-    bdd.sat_clauses()
-        .map(|clause| {
-            let literals = clause
-                .to_values()
-                .into_iter()
-                .map(|(var, value)| match value {
-                    true => var.to_index().to_string(),
-                    false => format!("!{}", var.to_index()),
-                })
-                .join(" & ");
-            match literals.is_empty() {
-                true => "t".to_string(),
-                false => literals,
-            }
-        })
-        .join(" | ")
 }
 
 /// Writes `aut` as HOA text, which parses back to an equal automaton.
@@ -200,10 +173,7 @@ impl Display for StateConjunction {
 
 impl Display for Label {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.0 {
-            LabelExpression::Abstract(expr) => write!(f, "[{}]", expr),
-            LabelExpression::Expression(bdd) => write!(f, "[{}]", bdd_to_expression(bdd)),
-        }
+        write!(f, "[{}]", self.0)
     }
 }
 
@@ -343,33 +313,5 @@ State: 0
         assert_eq!("!(!0)", label(*not(*not(Integer(0)))));
         assert_eq!("!t", label(*not(Boolean(true))));
         assert_eq!("0", label(Integer(0)));
-    }
-
-    #[test]
-    fn bdd_labels_are_printed_as_dnf() {
-        let vs = biodivine_lib_bdd::BddVariableSet::new_anonymous(2);
-        let bdd = vs.mk_var(biodivine_lib_bdd::BddVariable::from_index(0));
-        assert_eq!("[0]", Label(LabelExpression::Expression(bdd)).to_string());
-        assert_eq!(
-            "[f]",
-            Label(LabelExpression::Expression(vs.mk_false())).to_string()
-        );
-        assert_eq!(
-            "[t]",
-            Label(LabelExpression::Expression(vs.mk_true())).to_string()
-        );
-        let or = vs
-            .mk_var(biodivine_lib_bdd::BddVariable::from_index(0))
-            .or(&vs.mk_not_var(biodivine_lib_bdd::BddVariable::from_index(1)));
-        let printed = Label(LabelExpression::Expression(or.clone())).to_string();
-        // The printed DNF must parse back to the same BDD.
-        let text = format!(
-            "HOA: v1\nAP: 2 \"a\" \"b\"\nAcceptance: 1 Inf(0)\n--BODY--\nState: 0\n{printed} 0\n--END--"
-        );
-        let aut = parse(&text);
-        let LabelExpression::Abstract(expr) = &aut.body()[0].2[0].0.0 else {
-            panic!("expected an abstract label")
-        };
-        assert_eq!(or, expr.try_into_bdd(&vs).unwrap());
     }
 }

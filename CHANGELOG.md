@@ -7,7 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- **Breaking:** label conversion returns the new `LabelError` instead of a `String`: `AbstractLabelExpression::try_into_bdd`, `AbstractLabelExpression::try_into_prop` and `LabelExpression::try_into_hoa_expression`. It tells an out-of-range AP (`LabelError::ApOutOfRange { ap, count }`) from an unresolved alias (`LabelError::UnresolvedAlias(name)`) and implements `std::error::Error` (issue 6).
+- **Breaking:** `biodivine-lib-bdd` is no longer a dependency, so no BDD type appears in the API any more. Labels are only kept as the `AbstractLabelExpression` that was parsed: `Label` is now `Label(pub AbstractLabelExpression)` (and derefs to it), `LabelExpression` is gone, and `Aliases` holds `AbstractLabelExpression`s. Interpreting a label (as a BDD, a truth table, ...) is left to the user, who calls `HoaRepresentation::unalias` first and can use `AbstractLabelExpression::max_ap` (now public) to find the number of propositions it needs. `Label` is written with the `Display` of the expression, which no longer rewrites anything.
+
+  | 0.4 | 0.5 |
+  |---|---|
+  | `hoars::HoaExpression` (`Bdd`) | removed, build your own from the `AbstractLabelExpression` |
+  | `LabelExpression::{Abstract, Expression}`, `Label(LabelExpression)` | `Label(AbstractLabelExpression)`; `match &label.0 { LabelExpression::Abstract(e) => .. }` becomes `let e = &label.0;` |
+  | `AbstractLabelExpression::try_into_bdd`, `try_into_prop`, `LabelExpression::try_into_hoa_expression` | removed; fold the expression yourself over `Boolean`, `Integer`, `Negated`, `Conjunction`, `Disjunction` (`Alias` after `unalias` is an error) |
+  | `LabelError` (`ApOutOfRange`, `UnresolvedAlias`) | removed with the conversions; `HoaRepresentation::verify` still reports out-of-range propositions, `max_ap` gives the largest one |
+  | `Label(LabelExpression::Expression(bdd))` printed as a DNF | removed |
+  | `biodivine-lib-bdd` in `Cargo.toml` | none |
 - **Breaking:** `HoaRepresentation::unalias` returns the new `AliasError` (`Undefined`, `Cyclic`) and `HoaRepresentation::verify` returns `VerifyErrors`, a list of `VerifyError` (`DuplicateState`, `StateCountMismatch`), instead of `String`. Both implement `std::error::Error`, and `VerifyErrors` derefs to `[VerifyError]` (issue 6).
 
 ## [0.4.0] - 2026-11-06
