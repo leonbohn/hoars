@@ -15,7 +15,7 @@ mod value;
 pub mod label;
 #[allow(deprecated)]
 pub use label::MAX_APS;
-pub use label::{AbstractLabelExpression, HoaExpression, Label, LabelExpression};
+pub use label::{AbstractLabelExpression, Label};
 
 use tracing::warn;
 
@@ -26,9 +26,7 @@ use chumsky::{Parser, prelude::end};
 pub use format::*;
 
 pub use body::{Body, Edge, State};
-pub use error::{
-    AliasError, Diagnostic, FromHoaError, LabelError, ValidationError, VerifyError, VerifyErrors,
-};
+pub use error::{AliasError, Diagnostic, FromHoaError, ValidationError, VerifyError, VerifyErrors};
 pub use header::{Header, HeaderItem, UnknownValue};
 
 use itertools::Itertools;
@@ -52,7 +50,7 @@ pub type HoaAcceptance = (usize, AcceptanceCondition);
 
 /// Stores information on aliases, it holds a vector of pairs of alias
 /// names and label expression. This can be used to unalias an automaton.
-pub type Aliases = Vec<(AliasName, LabelExpression)>;
+pub type Aliases = Vec<(AliasName, AbstractLabelExpression)>;
 
 impl HoaRepresentation {
     /// Adds the given state.
@@ -206,9 +204,7 @@ impl HoaRepresentation {
                     .iter()
                     .copied()
                     .try_for_each(check_set)?;
-                if let LabelExpression::Abstract(expr) = &edge.label().0 {
-                    check_label(expr)?;
-                }
+                check_label(&edge.label().0)?;
             }
         }
         Ok(())
@@ -234,8 +230,8 @@ impl HoaRepresentation {
     ///
     /// # Panics
     ///
-    /// If there are more than [`u16::MAX`] atomic propositions, which BDDs cannot
-    /// represent anyway.
+    /// If there are more than [`u16::MAX`] atomic propositions, which label expressions
+    /// cannot refer to anyway.
     pub fn num_aps(&self) -> u16 {
         u16::try_from(self.aps().len())
             .expect("more than u16::MAX atomic propositions are not supported")
@@ -266,7 +262,7 @@ impl HoaRepresentation {
     /// their definitions. The `Alias:` header items are kept. Fails on undefined or
     /// cyclic aliases; on error the automaton is left unchanged.
     ///
-    /// Parsing does not unalias, so call this before converting labels to BDDs.
+    /// Parsing does not unalias, so call this before interpreting labels.
     pub fn unalias(&mut self) -> Result<(), AliasError> {
         let raw: std::collections::HashMap<_, _> = self
             .alias_iter()
@@ -284,11 +280,7 @@ impl HoaRepresentation {
             .collect::<Result<std::collections::HashMap<_, _>, AliasError>>()?;
         let mut body = self.body.clone();
         for edge in body.iter_mut().flat_map(|s| s.edges_mut()) {
-            if let LabelExpression::Abstract(expr) = &edge.label().0 {
-                edge.0 = Label(LabelExpression::Abstract(
-                    expr.substitute(&defs, &mut vec![])?,
-                ));
-            }
+            edge.0 = Label(edge.label().0.substitute(&defs, &mut vec![])?);
         }
         for (name, expr) in &mut self.header.aliases {
             *expr = defs[&name.0].clone();
@@ -480,29 +472,20 @@ State: 0
         let printed = crate::output::to_hoa(&aut);
         assert!(printed.contains("Alias: @y !(0 & 1) | 0"), "{printed}");
         assert!(printed.contains("[!(0 & 1) | 0] 0 {0}"), "{printed}");
-        // printing flattens nested conjunctions, so compare the labels as BDDs
+        // printing flattens nested conjunctions, so compare the labels semantically
         let reparsed = HoaRepresentation::try_from(printed.as_str()).unwrap();
-        let vs = biodivine_lib_bdd::BddVariableSet::new_anonymous(2);
-        let bdds = |a: &HoaRepresentation| {
+        let tables = |a: &HoaRepresentation| {
             a.body()[0]
                 .edges()
                 .iter()
-                .map(|e| {
-                    let crate::LabelExpression::Abstract(l) = &e.label().0 else {
-                        panic!()
-                    };
-                    l.try_into_bdd(&vs).unwrap()
-                })
+                .map(|e| crate::label::truth_table(&e.label().0, 2))
                 .collect::<Vec<_>>()
         };
-        assert_eq!(bdds(&aut), bdds(&reparsed));
-        // unresolved aliases do not convert
-        let crate::LabelExpression::Abstract(l) = &before.body()[0].edges()[0].label().0 else {
-            panic!()
-        };
+        assert_eq!(tables(&aut), tables(&reparsed));
+        // the automaton before unaliasing still refers to the alias
         assert_eq!(
-            l.try_into_bdd(&vs),
-            Err(crate::LabelError::UnresolvedAlias("y".into()))
+            before.body()[0].edges()[0].label().0,
+            crate::AbstractLabelExpression::Alias("y".into())
         );
     }
 
@@ -887,13 +870,13 @@ State: 0
                     .unwrap_or_else(|e| panic!("{name}: reprint does not parse: {e}\n{printed}"));
                 assert_eq!(reparsed, aut, "{name}: round trip changed the automaton");
                 aut.unalias().unwrap_or_else(|e| panic!("{name}: {e}"));
-                let vs = biodivine_lib_bdd::BddVariableSet::new_anonymous(aut.num_aps());
                 for state in aut.body().iter() {
                     for edge in state.edges() {
-                        if let crate::LabelExpression::Abstract(l) = &edge.label().0 {
-                            l.try_into_bdd(&vs)
-                                .unwrap_or_else(|e| panic!("{name}: label to BDD: {e}"));
-                        }
+                        let l = &edge.label().0;
+                        assert!(
+                            l.max_ap().is_none_or(|ap| ap < aut.num_aps()),
+                            "{name}: label {l} uses an unknown AP"
+                        );
                     }
                 }
             }

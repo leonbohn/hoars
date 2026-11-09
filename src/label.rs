@@ -1,14 +1,13 @@
-use biodivine_lib_bdd::{Bdd, BddVariable, BddVariableSet};
 use std::ops::Deref;
 
-use crate::{AliasError, LabelError};
+use crate::AliasError;
 
-/// Newtype wrapper around a [`crate::LabelExpression`], implements [`Deref`].
+/// Newtype wrapper around an [`AbstractLabelExpression`], implements [`Deref`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Label(pub LabelExpression);
+pub struct Label(pub AbstractLabelExpression);
 
 impl Deref for Label {
-    type Target = LabelExpression;
+    type Target = AbstractLabelExpression;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -34,39 +33,9 @@ pub enum AbstractLabelExpression {
 }
 
 impl AbstractLabelExpression {
-    /// Converts this expression into a [`Bdd`], using the variables of `vs`.
-    ///
-    /// The variable for AP `i` is `BddVariable::from_index(i)`, so `vs` must have at
-    /// least as many variables as the largest AP identifier used in this expression.
-    pub fn try_into_bdd(&self, vs: &BddVariableSet) -> Result<Bdd, LabelError> {
-        match self {
-            AbstractLabelExpression::Boolean(b) => Ok(match b {
-                true => vs.mk_true(),
-                false => vs.mk_false(),
-            }),
-            AbstractLabelExpression::Integer(i) => {
-                if *i < vs.num_vars() {
-                    Ok(vs.mk_var(BddVariable::from_index(*i as usize)))
-                } else {
-                    Err(LabelError::ApOutOfRange {
-                        ap: *i,
-                        count: vs.num_vars(),
-                    })
-                }
-            }
-            AbstractLabelExpression::Alias(name) => Err(LabelError::UnresolvedAlias(name.clone())),
-            AbstractLabelExpression::Negated(e) => Ok(e.try_into_bdd(vs)?.not()),
-            AbstractLabelExpression::Conjunction(cs) => cs
-                .iter()
-                .try_fold(vs.mk_true(), |acc, c| Ok(acc.and(&c.try_into_bdd(vs)?))),
-            AbstractLabelExpression::Disjunction(ds) => ds
-                .iter()
-                .try_fold(vs.mk_false(), |acc, d| Ok(acc.or(&d.try_into_bdd(vs)?))),
-        }
-    }
-
-    /// The highest AP index used in this expression, if any.
-    pub(crate) fn max_ap(&self) -> Option<u16> {
+    /// The highest AP index used in this expression, if any. Aliases are not followed, so call
+    /// [`crate::HoaRepresentation::unalias`] first to also account for them.
+    pub fn max_ap(&self) -> Option<u16> {
         match self {
             Self::Integer(i) => Some(*i),
             Self::Boolean(_) | Self::Alias(_) => None,
@@ -106,180 +75,46 @@ impl AbstractLabelExpression {
             Self::Boolean(_) | Self::Integer(_) => self.clone(),
         })
     }
-
-    /// Converts this expression into a [`Bdd`] over `num_aps` anonymous variables.
-    pub fn try_into_prop(&self, num_aps: u16) -> Result<HoaExpression, LabelError> {
-        let var_set = BddVariableSet::new_anonymous(num_aps);
-        self.try_into_bdd(&var_set)
-    }
 }
-
-/// The number of variables the `AnonymousAbstract` helpers build their BDDs over.
-const ANONYMOUS_APS: u8 = 6;
 
 /// Only used by test helpers in this crate, not meaningful for users.
 #[deprecated(since = "0.3.0", note = "an internal constant, define your own limit")]
-pub const MAX_APS: u8 = ANONYMOUS_APS;
+pub const MAX_APS: u8 = 6;
 
-/// Typedef for an expression used by a [`crate::HoaRepresentation`].
-pub type HoaExpression = Bdd;
-
-/// The expression of a [`Label`]: either as parsed or already converted to a BDD.
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub enum LabelExpression {
-    /// A BDD over the atomic propositions.
-    Expression(HoaExpression),
-    /// An expression as parsed.
-    Abstract(AbstractLabelExpression),
-}
-
-impl LabelExpression {
-    /// Converts the expression into a BDD over `num_aps` variables.
-    pub fn try_into_hoa_expression(self, num_aps: u16) -> Result<HoaExpression, LabelError> {
-        match self {
-            LabelExpression::Expression(b) => Ok(b),
-            LabelExpression::Abstract(b) => b.try_into_prop(num_aps),
+/// The truth table of `expr` over `num_aps` propositions: entry `v` is its value when AP `i` is
+/// true iff bit `i` of `v` is set. Panics on aliases.
+#[cfg(test)]
+pub(crate) fn truth_table(expr: &AbstractLabelExpression, num_aps: u16) -> Vec<bool> {
+    fn eval(e: &AbstractLabelExpression, v: usize) -> bool {
+        match e {
+            AbstractLabelExpression::Boolean(b) => *b,
+            AbstractLabelExpression::Integer(i) => v >> i & 1 == 1,
+            AbstractLabelExpression::Alias(a) => panic!("unresolved alias @{a}"),
+            AbstractLabelExpression::Negated(e) => !eval(e, v),
+            AbstractLabelExpression::Conjunction(es) => es.iter().all(|e| eval(e, v)),
+            AbstractLabelExpression::Disjunction(es) => es.iter().any(|e| eval(e, v)),
         }
     }
+    (0..1usize << num_aps).map(|v| eval(expr, v)).collect()
 }
 
 #[cfg(test)]
-#[allow(unused)]
-pub(crate) struct Anonymous<const PARSED: bool = false>;
+pub(crate) struct Anonymous;
 #[cfg(test)]
-#[allow(unused)]
-pub(crate) type AnonymousParsed = Anonymous<true>;
-#[cfg(test)]
-#[allow(unused)]
-pub(crate) type AnonymousAbstract = Anonymous<false>;
+pub(crate) type AnonymousAbstract = Anonymous;
 
 #[cfg(test)]
-#[allow(unused)]
-use AbstractLabelExpression::*;
-
-#[cfg(test)]
-#[allow(unused)]
 #[allow(dead_code)]
-impl Anonymous<false> {
-    pub fn var_expr(n: u16) -> LabelExpression {
-        assert!(n < ANONYMOUS_APS as u16);
-        LabelExpression::Abstract(AbstractLabelExpression::Integer(n))
-    }
-    pub fn not_var_expr(n: u16) -> LabelExpression {
-        assert!(n < ANONYMOUS_APS as u16);
-        LabelExpression::Abstract(Negated(Box::new(Integer(n))))
-    }
+impl Anonymous {
     pub fn top_label() -> Label {
-        Label(LabelExpression::Abstract(AbstractLabelExpression::Boolean(
-            true,
-        )))
+        Label(AbstractLabelExpression::Boolean(true))
     }
     pub fn var_label(n: u16) -> Label {
-        assert!(n < ANONYMOUS_APS as u16);
-        Label(Self::var_expr(n))
+        Label(AbstractLabelExpression::Integer(n))
     }
     pub fn not_var_label(n: u16) -> Label {
-        assert!(n < ANONYMOUS_APS as u16);
-        Label(Self::not_var_expr(n))
-    }
-}
-
-#[cfg(test)]
-#[allow(unused)]
-#[allow(dead_code)]
-impl Anonymous<true> {
-    pub fn var_expr(n: usize) -> LabelExpression {
-        assert!(n < ANONYMOUS_APS as usize);
-        LabelExpression::Expression(Self::var(n))
-    }
-    pub fn var_label(n: usize) -> Label {
-        assert!(n < ANONYMOUS_APS as usize);
-        Label(Self::var_expr(n))
-    }
-    pub fn var(n: usize) -> Bdd {
-        assert!(n < ANONYMOUS_APS as usize);
-        BddVariableSet::new_anonymous(ANONYMOUS_APS as u16).mk_var(BddVariable::from_index(n))
-    }
-    pub fn not_var(n: usize) -> Bdd {
-        assert!(n < ANONYMOUS_APS as usize);
-        BddVariableSet::new_anonymous(ANONYMOUS_APS as u16).mk_not_var(BddVariable::from_index(n))
-    }
-    pub fn top() -> Bdd {
-        BddVariableSet::new_anonymous(ANONYMOUS_APS as u16).mk_true()
-    }
-    pub fn top_expr() -> LabelExpression {
-        LabelExpression::Expression(Self::top())
-    }
-    pub fn top_label() -> Label {
-        Label(Self::top_expr())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn card(expr: &AbstractLabelExpression, num_aps: u16) -> f64 {
-        expr.try_into_prop(num_aps)
-            .expect("label should convert")
-            .cardinality()
-    }
-
-    fn int(i: u16) -> Box<AbstractLabelExpression> {
-        Box::new(Integer(i))
-    }
-
-    fn not(e: Box<AbstractLabelExpression>) -> AbstractLabelExpression {
-        Negated(e)
-    }
-
-    #[test]
-    fn composite_expressions_are_converted() {
-        // 0&!1 | !0&1
-        let xor = Disjunction(vec![
-            Conjunction(vec![Integer(0), not(int(1))]),
-            Conjunction(vec![not(int(0)), Integer(1)]),
-        ]);
-        assert_eq!(2.0, card(&xor, 2));
-
-        // (0|1)&!1 == 0&!1
-        let expr = Conjunction(vec![Disjunction(vec![Integer(0), Integer(1)]), not(int(1))]);
-        assert_eq!(1.0, card(&expr, 2));
-
-        // 0&t == 0
-        let expr = Conjunction(vec![Integer(0), Boolean(true)]);
-        assert_eq!(2.0, card(&expr, 2));
-
-        // 0&!0 == f
-        let expr = Conjunction(vec![Integer(0), not(int(0))]);
-        assert_eq!(0.0, card(&expr, 2));
-
-        assert_eq!(4.0, card(&Boolean(true), 2));
-        assert_eq!(0.0, card(&Boolean(false), 2));
-    }
-
-    #[test]
-    fn out_of_bounds_ap_is_an_error() {
-        let expr = Conjunction(vec![Integer(0), not(int(7))]);
-        let expected = LabelError::ApOutOfRange { ap: 7, count: 2 };
-        assert_eq!(expr.try_into_prop(2), Err(expected.clone()));
-        assert_eq!(Integer(7).try_into_prop(2), Err(expected.clone()));
-        assert_eq!(
-            LabelExpression::Abstract(Integer(7)).try_into_hoa_expression(2),
-            Err(expected)
-        );
-    }
-
-    #[test]
-    fn unresolved_alias_is_an_error() {
-        let expr = AbstractLabelExpression::Alias("x".into());
-        assert_eq!(
-            expr.try_into_prop(2),
-            Err(LabelError::UnresolvedAlias("x".into()))
-        );
-        assert_eq!(
-            expr.try_into_prop(2).unwrap_err().to_string(),
-            "alias @x is not resolved, call `HoaRepresentation::unalias` first"
-        );
+        Label(AbstractLabelExpression::Negated(Box::new(
+            AbstractLabelExpression::Integer(n),
+        )))
     }
 }
