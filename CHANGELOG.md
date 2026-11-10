@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+## [0.5.0] - 2026-11-10
+
+### Changed
+
 - **Breaking:** `biodivine-lib-bdd` is no longer a dependency, so no BDD type appears in the API any more. Labels are only kept as the `AbstractLabelExpression` that was parsed: `Label` is now `Label(pub AbstractLabelExpression)` (and derefs to it), `LabelExpression` is gone, and `Aliases` holds `AbstractLabelExpression`s. Interpreting a label (as a BDD, a truth table, ...) is left to the user, who calls `HoaRepresentation::unalias` first and can use `AbstractLabelExpression::max_ap` (now public) to find the number of propositions it needs. `Label` is written with the `Display` of the expression, which no longer rewrites anything.
 
   | 0.4 | 0.5 |

@@ -8,6 +8,10 @@ The format itself is thorougly described on [this website](https://adl.github.io
 Obtaining an overview of ω-automata helps before diving into the format itself, see for example [this one](https://spot.lre.epita.fr/concepts.html) given by the makers of [spot](https://spot.lre.epita.fr/).
 
 #### Changelog (most likely incomplete)
+
+**0.5.0** (2026-11-10)
+We no longer depend on `biodivine-lib-bdd` and instead move the parsing downstream to the `automata` crate, which in turn will use another BDD library `oxiDD`. So there is no BDD type anymore.
+
 **0.4.0** (2026-11-06)
 
 See `CHANGELOG.md` for the full list. Breaking: `HoaRepresentation::aps` returns `&[String]`, `num_aps` returns `u16`, `acceptance` returns `Option<HoaAcceptance>`, and `Header::acceptance_name` returns `Option<AcceptanceName>`; accessors no longer panic on missing optional header items. `AbstractLabelExpression::try_into_bdd` now takes only a `&BddVariableSet` (the AP `i` is variable `BddVariable::from_index(i)`), and takes `&self`; `try_into_prop`/`try_into_hoa_expression` take the AP count as `u16`. The unused `build_vars` helper was removed. Overflowing integers are now parse errors instead of panics, and labels with nested conjunctions/disjunctions are converted correctly.
